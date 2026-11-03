@@ -4,7 +4,7 @@ import Button from '../components/ui/Button';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
 import { formatRupiah } from '../utils/formatRupiah';
-import { formatDate } from '../utils/formatDate';
+import { formatDate, formatDateTime } from '../utils/formatDate';
 import { exportToCsv } from '../utils/exportCsv';
 import {
   ResponsiveContainer,
@@ -14,7 +14,6 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  Legend,
 } from 'recharts';
 import {
   TrendingUp,
@@ -25,14 +24,12 @@ import {
   Building2,
   CheckCircle2,
   Receipt,
-  FileSpreadsheet,
-  ArrowRight,
   ShieldCheck,
 } from 'lucide-react';
 
 export default function CashReports() {
   const { isSuperAdmin, isAdmin } = useAuth();
-  const { transactions, systemSettings } = useData();
+  const { transactions, systemSettings, loading } = useData();
 
   // Mode & Periode State
   const [reportMode, setReportMode] = useState('monthly'); // 'daily' | 'monthly'
@@ -41,6 +38,7 @@ export default function CashReports() {
 
   // Filter HANYA transaksi yang 'Verified' (Sesuai Kebutuhan F3)
   const verifiedTransactions = useMemo(() => {
+    if (!transactions || !Array.isArray(transactions)) return [];
     return transactions.filter((t) => t.verification_status === 'Verified');
   }, [transactions]);
 
@@ -48,18 +46,18 @@ export default function CashReports() {
   const periodTransactions = useMemo(() => {
     if (reportMode === 'daily') {
       return verifiedTransactions.filter((t) =>
-        t.transaction_date.startsWith(selectedDate)
+        t?.transaction_date && t.transaction_date.startsWith(selectedDate)
       );
     } else {
       return verifiedTransactions.filter((t) =>
-        t.transaction_date.startsWith(selectedMonth)
+        t?.transaction_date && t.transaction_date.startsWith(selectedMonth)
       );
     }
   }, [verifiedTransactions, reportMode, selectedDate, selectedMonth]);
 
   // Metrik KPI
   const totalPenerimaan = useMemo(() => {
-    return periodTransactions.reduce((sum, t) => sum + Number(t.amount_paid), 0);
+    return periodTransactions.reduce((sum, t) => sum + Number(t.amount_paid || 0), 0);
   }, [periodTransactions]);
 
   const totalTransaksi = periodTransactions.length;
@@ -70,7 +68,7 @@ export default function CashReports() {
     const stats = { 'Transfer Bank': 0, 'E-Wallet': 0, Cash: 0 };
     periodTransactions.forEach((t) => {
       if (stats[t.payment_method] !== undefined) {
-        stats[t.payment_method] += Number(t.amount_paid);
+        stats[t.payment_method] += Number(t.amount_paid || 0);
       }
     });
     return [
@@ -102,11 +100,13 @@ export default function CashReports() {
       const days = [];
       for (let day = 1; day <= 30; day++) {
         const dayStr = `${selectedMonth}-${String(day).padStart(2, '0')}`;
-        const dayTxs = periodTransactions.filter((t) => t.transaction_date.startsWith(dayStr));
-        const dayTotal = dayTxs.reduce((sum, t) => sum + Number(t.amount_paid), 0);
+        const dayTxs = periodTransactions.filter(
+          (t) => t?.transaction_date && t.transaction_date.startsWith(dayStr)
+        );
+        const dayTotal = dayTxs.reduce((sum, t) => sum + Number(t.amount_paid || 0), 0);
         days.push({
           label: `${day}`,
-          dateStr,
+          dateStr: dayStr,
           Penerimaan: dayTotal,
           count: dayTxs.length,
         });
@@ -116,10 +116,11 @@ export default function CashReports() {
       // Breakdown metode jika harian
       return methodStats.map((m) => ({
         label: m.method,
+        dateStr: selectedDate,
         Penerimaan: m.total,
       }));
     }
-  }, [reportMode, selectedMonth, periodTransactions, methodStats]);
+  }, [reportMode, selectedMonth, selectedDate, periodTransactions, methodStats]);
 
   // Handler Print View
   const handlePrint = () => {
@@ -129,7 +130,7 @@ export default function CashReports() {
   // Handler Export CSV
   const handleExportCsv = () => {
     const exportData = periodTransactions.map((t) => ({
-      'No Referensi': t.reference_number,
+      'No Referensi': t.reference_number || `TRX-${t.transaction_id}`,
       Tanggal: t.transaction_date,
       NIS: t.student?.nis || '',
       'Nama Siswa': t.student?.nama || '',
@@ -139,7 +140,10 @@ export default function CashReports() {
       'Metode Pembayaran': t.payment_method,
       'Status Verifikasi': 'Verified',
     }));
-    exportToCsv(`Laporan_Kas_${reportMode}_${reportMode === 'daily' ? selectedDate : selectedMonth}`, exportData);
+    exportToCsv(
+      `Laporan_Kas_${reportMode}_${reportMode === 'daily' ? selectedDate : selectedMonth}`,
+      exportData
+    );
   };
 
   const institutionName = systemSettings?.institutionName || 'SMA Nusantara Mandiri';
@@ -427,7 +431,7 @@ export default function CashReports() {
                         {t.reference_number || `TRX-${t.transaction_id}`}
                       </td>
                       <td className="p-3.5 text-slate-500">
-                        {formatDate(t.transaction_date, true)}
+                        {formatDateTime(t.transaction_date)}
                       </td>
                       <td className="p-3.5">
                         <div className="font-semibold text-slate-900 dark:text-white">
