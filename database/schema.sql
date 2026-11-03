@@ -1,27 +1,26 @@
 -- =============================================================================
--- PROYEK: UduPay Monitor - Monitoring Pembayaran SPP & Anggaran Institusi
+-- PROYEK: EduPay Monitor - Sistem Monitoring SPP & Anggaran Institusi
 -- FILE: database/schema.sql
 -- DIALECT: PostgreSQL (v14+)
 -- ZONA WAKTU: Asia/Jakarta (TIMESTAMPTZ)
 -- MATA UANG: Rupiah (DECIMAL 12,2 dan 14,2)
 -- =============================================================================
 
--- Pastikan ekstensi yang dibutuhkan aktif
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
--- Set default timezone
 SET timezone = 'Asia/Jakarta';
 
 -- =============================================================================
 -- 1. DROP EXISTING OBJECTS (Untuk Idempotensi Migrasi Bersih)
 -- =============================================================================
+DROP VIEW IF EXISTS view_budget_realization CASCADE;
 DROP VIEW IF EXISTS view_overdue_bills CASCADE;
 DROP VIEW IF EXISTS view_class_payment_status CASCADE;
 DROP VIEW IF EXISTS view_monthly_cash_recap CASCADE;
 DROP VIEW IF EXISTS view_daily_cash_recap CASCADE;
-DROP VIEW IF EXISTS view_budget_realization CASCADE;
 
+DROP TABLE IF EXISTS system_settings CASCADE;
 DROP TABLE IF EXISTS budget_expenditures CASCADE;
 DROP TABLE IF EXISTS budget_allocations CASCADE;
 DROP TABLE IF EXISTS audit_logs CASCADE;
@@ -54,16 +53,16 @@ CREATE TYPE notification_status_enum AS ENUM ('Sent', 'Failed', 'Pending');
 -- 3. TABEL MASTER: KELAS & STRUKTUR BIAYA
 -- =============================================================================
 
--- Tabel Kelas
+-- Tabel classes (6 Kelas)
 CREATE TABLE classes (
     class_id SERIAL PRIMARY KEY,
-    nama_kelas VARCHAR(50) NOT NULL,
-    tingkat VARCHAR(20) NOT NULL,              -- Contoh: '10', '11', '12'
-    tahun_ajaran VARCHAR(20) NOT NULL,          -- Contoh: '2024/2025'
+    nama_kelas VARCHAR(50) NOT NULL UNIQUE,     -- Contoh: 'X-A', 'X-B', 'XI-MIPA', 'XI-IPS', 'XII-MIPA', 'XII-IPS'
+    tingkat VARCHAR(20) NOT NULL,               -- '10', '11', '12'
+    tahun_ajaran VARCHAR(20) NOT NULL,          -- '2026/2027'
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
--- Tabel Siswa
+-- Tabel students (120 Siswa)
 CREATE TABLE students (
     student_id SERIAL PRIMARY KEY,
     nis VARCHAR(20) NOT NULL UNIQUE,
@@ -76,29 +75,29 @@ CREATE TABLE students (
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
--- Tabel fee_structures (Wajib: fee_id INT PK | fee_name VARCHAR(100) | amount DECIMAL(12,2) | due_date DATE)
+-- Tabel fee_structures (Wajib Skema Utama: fee_id INT PK | fee_name VARCHAR(100) | amount DECIMAL(12,2) | due_date DATE)
 CREATE TABLE fee_structures (
     fee_id SERIAL PRIMARY KEY,
     fee_name VARCHAR(100) NOT NULL,
     amount DECIMAL(12,2) NOT NULL,
     due_date DATE NOT NULL,
-    academic_year VARCHAR(20) DEFAULT '2024/2025',
+    academic_year VARCHAR(20) DEFAULT '2026/2027',
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT chk_fee_amount_positive CHECK (amount > 0)
 );
 
 -- =============================================================================
--- 4. AUTENTIKASI & OTORISASI (RBAC)
+-- 4. AUTENTIKASI, PERAN (RBAC 3 TINGKAT: SUPER ADMIN, ADMIN, USER) & PENGGUNA
 -- =============================================================================
 
--- Tabel Peran (Roles)
+-- Tabel roles
 CREATE TABLE roles (
     role_id SERIAL PRIMARY KEY,
-    role_name VARCHAR(50) NOT NULL UNIQUE,      -- 'admin', 'bendahara', 'kepala_sekolah', 'orang_tua'
+    role_name VARCHAR(50) NOT NULL UNIQUE,      -- 'super_admin', 'admin', 'user'
     deskripsi VARCHAR(255)
 );
 
--- Tabel Pengguna (Users)
+-- Tabel users
 CREATE TABLE users (
     user_id SERIAL PRIMARY KEY,
     username VARCHAR(50) NOT NULL UNIQUE,
@@ -106,12 +105,13 @@ CREATE TABLE users (
     nama_lengkap VARCHAR(100) NOT NULL,
     email VARCHAR(100) NOT NULL UNIQUE,
     role_id INT NOT NULL REFERENCES roles(role_id) ON DELETE RESTRICT,
+    student_id INT REFERENCES students(student_id) ON DELETE SET NULL, -- Terikat jika role adalah 'user'
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     last_login_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
--- Relasi Multi Orang Tua ↔ Siswa (untuk akun login orang tua yang memiliki 1 atau lebih anak)
+-- Relasi Multi Orang Tua ↔ Siswa
 CREATE TABLE parent_students (
     parent_user_id INT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
     student_id INT NOT NULL REFERENCES students(student_id) ON DELETE CASCADE,
@@ -121,16 +121,37 @@ CREATE TABLE parent_students (
 );
 
 -- =============================================================================
--- 5. TABEL INTI TRANSAKSI KEUANGAN SPP
+-- 5. TABEL PENGATURAN SISTEM (KHUSUS WEWENANG SUPER ADMIN)
 -- =============================================================================
 
--- Tabel Tagihan Siswa (student_bills)
+CREATE TABLE system_settings (
+    setting_id SERIAL PRIMARY KEY,
+    institution_name VARCHAR(150) NOT NULL DEFAULT 'SMA Nusantara Mandiri',
+    institution_motto VARCHAR(255) DEFAULT 'Unggul, Berkarakter & Berdaya Saing Global',
+    academic_year VARCHAR(20) NOT NULL DEFAULT '2026/2027',
+    system_date DATE NOT NULL DEFAULT '2026-11-03',
+    address TEXT DEFAULT 'Jl. Pendidikan No. 45, Kebayoran Baru, Jakarta Selatan',
+    phone VARCHAR(50) DEFAULT '(021) 7890-1234',
+    whatsapp_contact VARCHAR(50) DEFAULT '0812-3456-7890',
+    email VARCHAR(100) DEFAULT 'info@edupay.sch.id',
+    bank_accounts JSONB NOT NULL DEFAULT '[]'::jsonb,
+    overdue_grace_days INT NOT NULL DEFAULT 3,
+    maintenance_mode BOOLEAN NOT NULL DEFAULT FALSE,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_by INT REFERENCES users(user_id) ON DELETE SET NULL
+);
+
+-- =============================================================================
+-- 6. TABEL INTI TRANSAKSI KEUANGAN SPP
+-- =============================================================================
+
+-- Tabel student_bills (Tagihan Siswa)
 -- Wajib: bill_id INT PK | student_id INT | fee_id INT FK→fee_structures | amount_due DECIMAL(12,2) | payment_status ENUM | created_at DATE
 CREATE TABLE student_bills (
     bill_id SERIAL PRIMARY KEY,
     student_id INT NOT NULL REFERENCES students(student_id) ON DELETE RESTRICT,
     fee_id INT NOT NULL REFERENCES fee_structures(fee_id) ON DELETE RESTRICT,
-    amount_due DECIMAL(12,2) NOT NULL,
+    amount_due DECIMAL(12,2) NOT NULL,          -- Sisa kewajiban yang harus dibayar
     payment_status payment_status_enum NOT NULL DEFAULT 'Unpaid',
     created_at DATE NOT NULL DEFAULT CURRENT_DATE,
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
@@ -138,7 +159,7 @@ CREATE TABLE student_bills (
     CONSTRAINT uq_student_fee UNIQUE (student_id, fee_id)
 );
 
--- Tabel Transaksi Pembayaran (payment_transactions)
+-- Tabel payment_transactions (Transaksi Pembayaran)
 -- Wajib: transaction_id BIGINT PK | bill_id INT FK→student_bills | amount_paid DECIMAL(12,2) |
 -- payment_method VARCHAR(50) ('Transfer Bank','E-Wallet','Cash') | transaction_date DATETIME |
 -- verification_status ENUM('Pending','Verified','Rejected')
@@ -160,10 +181,10 @@ CREATE TABLE payment_transactions (
 );
 
 -- =============================================================================
--- 6. TABEL LOG & NOTIFIKASI
+-- 7. TABEL LOG & NOTIFIKASI
 -- =============================================================================
 
--- Tabel Log Notifikasi (notification_logs)
+-- Tabel notification_logs
 CREATE TABLE notification_logs (
     notification_id BIGSERIAL PRIMARY KEY,
     bill_id INT NOT NULL REFERENCES student_bills(bill_id) ON DELETE CASCADE,
@@ -176,7 +197,7 @@ CREATE TABLE notification_logs (
     CONSTRAINT chk_notif_status CHECK (status_kirim IN ('Sent', 'Failed', 'Pending'))
 );
 
--- Tabel Audit Trail (audit_logs)
+-- Tabel audit_logs
 CREATE TABLE audit_logs (
     log_id BIGSERIAL PRIMARY KEY,
     user_id INT REFERENCES users(user_id) ON DELETE SET NULL,
@@ -189,20 +210,20 @@ CREATE TABLE audit_logs (
 );
 
 -- =============================================================================
--- 7. TABEL ANGGARAN OPERASIONAL INSTITUSI
+-- 8. TABEL ANGGARAN OPERASIONAL INSTITUSI
 -- =============================================================================
 
--- Tabel Alokasi Anggaran (budget_allocations)
+-- Tabel budget_allocations
 CREATE TABLE budget_allocations (
     allocation_id SERIAL PRIMARY KEY,
     kategori VARCHAR(100) NOT NULL,
-    periode VARCHAR(20) NOT NULL,              -- Misal: '2024/2025' atau '2024-Q3'
+    periode VARCHAR(20) NOT NULL,              -- '2026/2027'
     nominal_alokasi DECIMAL(14,2) NOT NULL,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT chk_budget_allocation_positive CHECK (nominal_alokasi > 0)
 );
 
--- Tabel Realisasi Pengeluaran Anggaran (budget_expenditures)
+-- Tabel budget_expenditures
 CREATE TABLE budget_expenditures (
     expenditure_id SERIAL PRIMARY KEY,
     allocation_id INT NOT NULL REFERENCES budget_allocations(allocation_id) ON DELETE RESTRICT,
@@ -215,16 +236,13 @@ CREATE TABLE budget_expenditures (
 );
 
 -- =============================================================================
--- 8. INDEX UNTUK PERFORMA QUERY TINGGI
+-- 9. INDEX UNTUK PERFORMA QUERY
 -- =============================================================================
-
--- Index Kebutuhan Wajib & Filter Pelaporan
 CREATE INDEX idx_fee_structures_due_date ON fee_structures(due_date);
 CREATE INDEX idx_student_bills_payment_status ON student_bills(payment_status);
 CREATE INDEX idx_payment_transactions_date ON payment_transactions(transaction_date);
 CREATE INDEX idx_payment_transactions_status ON payment_transactions(verification_status);
 
--- Composite & Foreign Key Indexes
 CREATE INDEX idx_student_bills_student ON student_bills(student_id);
 CREATE INDEX idx_student_bills_fee ON student_bills(fee_id);
 CREATE INDEX idx_student_bills_status_due ON student_bills(payment_status, created_at);
@@ -237,7 +255,7 @@ CREATE INDEX idx_notification_logs_bill ON notification_logs(bill_id);
 CREATE INDEX idx_audit_logs_waktu ON audit_logs(waktu);
 
 -- =============================================================================
--- 9. TRIGGER: OTOMASISASI SISA TAGIHAN & STATUS PEMBAYARAN
+-- 10. TRIGGER LOGIKA BISNIS: SINKRONISASI STATUS PEMBAYARAN OTOMATIS
 -- =============================================================================
 
 CREATE OR REPLACE FUNCTION fn_update_bill_status_on_transaction()
@@ -250,35 +268,35 @@ DECLARE
     v_new_amount_due DECIMAL(12,2);
     v_new_status payment_status_enum;
 BEGIN
-    -- Menentukan bill_id target
+    -- Menentukan ID tagihan target
     IF (TG_OP = 'DELETE') THEN
         v_target_bill_id := OLD.bill_id;
     ELSE
         v_target_bill_id := NEW.bill_id;
     END IF;
 
-    -- Mengambil nominal awal dan jatuh tempo tagihan
+    -- Mengambil nominal kewajiban awal dan jatuh tempo
     SELECT fs.amount, fs.due_date
     INTO v_fee_amount, v_due_date
     FROM student_bills sb
     JOIN fee_structures fs ON sb.fee_id = fs.fee_id
     WHERE sb.bill_id = v_target_bill_id;
 
-    -- Menghitung total transaksi yang sudah di-Verified
+    -- Menghitung total transaksi yang berstatus sah ('Verified')
     SELECT COALESCE(SUM(amount_paid), 0)
     INTO v_total_verified_paid
     FROM payment_transactions
     WHERE bill_id = v_target_bill_id
       AND verification_status = 'Verified';
 
-    -- Menghitung sisa tagihan (amount_due tidak boleh minus)
+    -- Menghitung sisa tagihan (amount_due)
     v_new_amount_due := GREATEST(0, v_fee_amount - v_total_verified_paid);
 
-    -- Logika Penentuan Status Pembayaran:
-    -- 1. Lunas jika v_new_amount_due <= 0
-    -- 2. Jika sisa > 0 dan sudah lewat due_date -> Overdue
-    -- 3. Jika sisa > 0 dan sudah ada cicilan yang verified -> Partial
-    -- 4. Jika belum ada pembayaran verified sama sekali -> Unpaid
+    -- State Machine Status Pembayaran:
+    -- 1. Lunas jika sisa <= 0
+    -- 2. Lewat jatuh tempo (Overdue) jika sisa > 0 dan due_date < CURRENT_DATE
+    -- 3. Cicilan (Partial) jika sudah ada bayar verified > 0
+    -- 4. Belum bayar (Unpaid) jika verified = 0
     IF v_new_amount_due <= 0 THEN
         v_new_status := 'Paid';
     ELSIF v_due_date < CURRENT_DATE THEN
@@ -289,7 +307,7 @@ BEGIN
         v_new_status := 'Unpaid';
     END IF;
 
-    -- Update tabel student_bills
+    -- Update ke tabel student_bills
     UPDATE student_bills
     SET
         amount_due = v_new_amount_due,
@@ -301,14 +319,13 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Trigger terpasang saat INSERT, UPDATE verification_status/amount_paid, atau DELETE transaksi
 CREATE TRIGGER trg_sync_bill_on_transaction
 AFTER INSERT OR UPDATE OF verification_status, amount_paid OR DELETE
 ON payment_transactions
 FOR EACH ROW
 EXECUTE FUNCTION fn_update_bill_status_on_transaction();
 
--- Stored Procedure Scheduler Harian: Mengubah status menjadi 'Overdue' jika melewati due_date
+-- Prosedur Scheduler Cron Harian: Memperbarui tagihan yang melewati jatuh tempo
 CREATE OR REPLACE FUNCTION sp_refresh_overdue_bills()
 RETURNS INT AS $$
 DECLARE
@@ -330,10 +347,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- =============================================================================
--- 10. TRIGGER: AUDIT TRAIL OTOMATIS TRANSAKSI PEMBAYARAN
--- =============================================================================
-
+-- Trigger Audit Trail Otomatis Transaksi
 CREATE OR REPLACE FUNCTION fn_audit_payment_transactions()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -370,10 +384,10 @@ FOR EACH ROW
 EXECUTE FUNCTION fn_audit_payment_transactions();
 
 -- =============================================================================
--- 11. VIEW ANALITIK DATABASE
+-- 11. VIEW DATABASE ANALITIK (F1 - F5)
 -- =============================================================================
 
--- View V1: Rekapitulasi Kas Harian (F3) - Hanya Transaksi Verified
+-- V1: Rekapitulasi Kas Harian (F3) - Verified Only
 CREATE OR REPLACE VIEW view_daily_cash_recap AS
 SELECT
     DATE(pt.transaction_date) AS tanggal,
@@ -387,7 +401,7 @@ WHERE pt.verification_status = 'Verified'
 GROUP BY DATE(pt.transaction_date)
 ORDER BY tanggal DESC;
 
--- View V2: Rekapitulasi Kas Bulanan (F3) - Hanya Transaksi Verified
+-- V2: Rekapitulasi Kas Bulanan (F3) - Verified Only
 CREATE OR REPLACE VIEW view_monthly_cash_recap AS
 SELECT
     TO_CHAR(pt.transaction_date, 'YYYY-MM') AS periode_bulan,
@@ -401,7 +415,7 @@ WHERE pt.verification_status = 'Verified'
 GROUP BY TO_CHAR(pt.transaction_date, 'YYYY-MM')
 ORDER BY periode_bulan DESC;
 
--- View V3: Rekap Status Pembayaran per Kelas (F1)
+-- V3: Rekap Status Pembayaran per Kelas (F1)
 CREATE OR REPLACE VIEW view_class_payment_status AS
 SELECT
     c.class_id,
@@ -426,7 +440,7 @@ JOIN fee_structures fs ON sb.fee_id = fs.fee_id
 GROUP BY c.class_id, c.nama_kelas, c.tingkat, c.tahun_ajaran
 ORDER BY c.tingkat ASC, c.nama_kelas ASC;
 
--- View V4: Overdue Tracking & Tagihan Mendekati Jatuh Tempo (F2)
+-- V4: Overdue Tracking & Tagihan Mendekati Jatuh Tempo (F2)
 CREATE OR REPLACE VIEW view_overdue_bills AS
 SELECT
     sb.bill_id,
@@ -459,7 +473,7 @@ JOIN fee_structures fs ON sb.fee_id = fs.fee_id
 WHERE sb.amount_due > 0
 ORDER BY fs.due_date ASC, sb.amount_due DESC;
 
--- View V5: Realisasi vs Alokasi Anggaran (F5)
+-- V5: Realisasi vs Alokasi Anggaran (F5)
 CREATE OR REPLACE VIEW view_budget_realization AS
 SELECT
     ba.allocation_id,
@@ -476,4 +490,3 @@ FROM budget_allocations ba
 LEFT JOIN budget_expenditures be ON ba.allocation_id = be.allocation_id
 GROUP BY ba.allocation_id, ba.kategori, ba.periode, ba.nominal_alokasi
 ORDER BY ba.kategori ASC;
-

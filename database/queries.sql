@@ -1,5 +1,5 @@
 -- =============================================================================
--- PROYEK: UduPay Monitor - Kumpulan Query Analitik (F1 - F5)
+-- PROYEK: EduPay Monitor - Kumpulan Query Analitik Lengkap (F1 - F6)
 -- FILE: database/queries.sql
 -- DIALECT: PostgreSQL (v14+)
 -- ZONA WAKTU: Asia/Jakarta
@@ -11,10 +11,7 @@
 -- =============================================================================
 
 -- F1.1: Rekapitulasi Status Kelunasan (Lunas, Menunggak, Cicilan) per Kelas
--- Mengelompokkan tagihan berdasarkan kelas dan status:
---   - Lunas (Paid)
---   - Cicilan (Partial)
---   - Menunggak (Unpaid & Overdue)
+-- Digunakan untuk grafik batang bertumpuk status pembayaran per kelas
 SELECT
     c.class_id,
     c.nama_kelas,
@@ -38,32 +35,28 @@ JOIN fee_structures fs ON sb.fee_id = fs.fee_id
 GROUP BY c.class_id, c.nama_kelas, c.tingkat, c.tahun_ajaran
 ORDER BY c.tingkat ASC, c.nama_kelas ASC;
 
--- F1.2: Distribusi Metode Pembayaran (Tunai vs Transfer vs E-Wallet) per Kelas
--- Hanya menghitung transaksi yang telah diverifikasi (Verified)
+-- F1.2: Distribusi Metode Pembayaran (Tunai vs Transfer Bank vs E-Wallet)
+-- Digunakan untuk Donut Chart metode pembayaran pada dashboard
 SELECT
-    c.nama_kelas,
-    COUNT(CASE WHEN pt.payment_method = 'Cash' THEN 1 END) AS tx_cash_count,
-    SUM(CASE WHEN pt.payment_method = 'Cash' THEN pt.amount_paid ELSE 0 END) AS total_cash,
-    COUNT(CASE WHEN pt.payment_method = 'Transfer Bank' THEN 1 END) AS tx_transfer_count,
-    SUM(CASE WHEN pt.payment_method = 'Transfer Bank' THEN pt.amount_paid ELSE 0 END) AS total_transfer,
-    COUNT(CASE WHEN pt.payment_method = 'E-Wallet' THEN 1 END) AS tx_ewallet_count,
-    SUM(CASE WHEN pt.payment_method = 'E-Wallet' THEN pt.amount_paid ELSE 0 END) AS total_ewallet,
-    SUM(pt.amount_paid) AS total_keseluruhan
-FROM classes c
-JOIN students s ON c.class_id = s.class_id
-JOIN student_bills sb ON s.student_id = sb.student_id
-JOIN payment_transactions pt ON sb.bill_id = pt.bill_id
+    pt.payment_method,
+    COUNT(pt.transaction_id) AS total_frekuensi,
+    SUM(pt.amount_paid) AS total_nominal_rupiah,
+    ROUND(
+        (SUM(pt.amount_paid) / (SELECT SUM(amount_paid) FROM payment_transactions WHERE verification_status = 'Verified')) * 100,
+        2
+    ) AS persentase_pangsa
+FROM payment_transactions pt
 WHERE pt.verification_status = 'Verified'
-GROUP BY c.class_id, c.nama_kelas
-ORDER BY c.nama_kelas ASC;
+GROUP BY pt.payment_method
+ORDER BY total_nominal_rupiah DESC;
 
 
 -- =============================================================================
--- [F2] OVERDUE TRACKING (MENDEKATI & MELEWATI JATUH TEMPO)
+-- [F2] OVERDUE TRACKING (MENDEKATI H-7, H-3, H-1 & LEWAT JATUH TEMPO)
 -- =============================================================================
 
 -- F2.1: Daftar Tagihan Overdue & Pengingat H-7, H-3, H-1 dengan Jumlah Hari Keterlambatan
--- Digunakan untuk alert sistem dan daftar prioritas penagihan
+-- Diurutkan dari yang paling terlambat (prioritas penagihan tertinggi)
 SELECT
     sb.bill_id,
     s.nis,
@@ -83,7 +76,7 @@ SELECT
         WHEN fs.due_date = CURRENT_DATE + INTERVAL '1 day' THEN 'Reminder H-1'
         WHEN fs.due_date <= CURRENT_DATE + INTERVAL '3 days' THEN 'Reminder H-3'
         WHEN fs.due_date <= CURRENT_DATE + INTERVAL '7 days' THEN 'Reminder H-7'
-        ELSE 'Belum Jatuh Tempo'
+        ELSE 'Masa Aktif Normal'
     END AS status_urgensi
 FROM student_bills sb
 JOIN students s ON sb.student_id = s.student_id
@@ -91,25 +84,22 @@ JOIN classes c ON s.class_id = c.class_id
 JOIN fee_structures fs ON sb.fee_id = fs.fee_id
 WHERE sb.amount_due > 0
   AND fs.due_date <= (CURRENT_DATE + INTERVAL '7 days')
-ORDER BY
-    (CURRENT_DATE - fs.due_date) DESC,
-    sb.amount_due DESC;
+ORDER BY (CURRENT_DATE - fs.due_date) DESC, sb.amount_due DESC;
 
--- F2.2: Ringkasan KPI Overdue Berdasarkan Rentang Hari Keterlambatan
+-- F2.2: Rekapitulasi Tingkat Keparahan Overdue (1–7 hari, 8–30 hari, >30 hari)
 SELECT
     CASE
-        WHEN (CURRENT_DATE - fs.due_date) BETWEEN 1 AND 7 THEN '1 - 7 Hari'
-        WHEN (CURRENT_DATE - fs.due_date) BETWEEN 8 AND 14 THEN '8 - 14 Hari'
-        WHEN (CURRENT_DATE - fs.due_date) BETWEEN 15 AND 30 THEN '15 - 30 Hari'
+        WHEN (CURRENT_DATE - fs.due_date) BETWEEN 1 AND 7 THEN '1 - 7 Hari (Sedang)'
+        WHEN (CURRENT_DATE - fs.due_date) BETWEEN 8 AND 30 THEN '8 - 30 Hari (Tinggi)'
         WHEN (CURRENT_DATE - fs.due_date) > 30 THEN '> 30 Hari (Kritis)'
-        ELSE 'Mendekati H-7 s/d H-0'
-    END AS rentang_keterlambatan,
-    COUNT(sb.bill_id) AS total_tagihan_overdue,
+        ELSE 'Mendekati H-7 s/d Hari H'
+    END AS rentang_urgensi,
+    COUNT(sb.bill_id) AS jumlah_tagihan,
     SUM(sb.amount_due) AS total_nominal_tunggakan
 FROM student_bills sb
 JOIN fee_structures fs ON sb.fee_id = fs.fee_id
 WHERE sb.amount_due > 0 AND fs.due_date <= CURRENT_DATE
-GROUP BY rentang_keterlambatan
+GROUP BY rentang_urgensi
 ORDER BY MIN(CURRENT_DATE - fs.due_date) DESC;
 
 
@@ -117,21 +107,21 @@ ORDER BY MIN(CURRENT_DATE - fs.due_date) DESC;
 -- [F3] REKAPITULASI PENERIMAAN KAS HARIAN DAN BULANAN (VERIFIED ONLY)
 -- =============================================================================
 
--- F3.1: Rekapitulasi Penerimaan Kas Harian (7 Hari Terakhir / Rentang Custom)
+-- F3.1: Rekap Penerimaan Kas Harian (30 Hari Terakhir)
 SELECT
     DATE(pt.transaction_date) AS tanggal_transaksi,
-    COUNT(pt.transaction_id) AS frekuensi_transaksi,
+    COUNT(pt.transaction_id) AS total_transaksi,
     SUM(CASE WHEN pt.payment_method = 'Transfer Bank' THEN pt.amount_paid ELSE 0 END) AS kas_transfer,
     SUM(CASE WHEN pt.payment_method = 'E-Wallet' THEN pt.amount_paid ELSE 0 END) AS kas_ewallet,
     SUM(CASE WHEN pt.payment_method = 'Cash' THEN pt.amount_paid ELSE 0 END) AS kas_tunai,
-    SUM(pt.amount_paid) AS total_penerimaan_harian
+    SUM(pt.amount_paid) AS grand_total_harian
 FROM payment_transactions pt
 WHERE pt.verification_status = 'Verified'
   AND pt.transaction_date >= (CURRENT_DATE - INTERVAL '30 days')
 GROUP BY DATE(pt.transaction_date)
 ORDER BY tanggal_transaksi DESC;
 
--- F3.2: Rekapitulasi Penerimaan Kas Bulanan (Tahun Berjalan)
+-- F3.2: Rekap Penerimaan Kas Bulanan (Tahun Berjalan)
 SELECT
     TO_CHAR(pt.transaction_date, 'YYYY-MM') AS periode_bulan,
     COUNT(pt.transaction_id) AS total_transaksi,
@@ -146,11 +136,10 @@ ORDER BY periode_bulan DESC;
 
 
 -- =============================================================================
--- [F4] QUERY NOTIFIKASI OTOMATIS KE ORANG TUA (CRON SCHEDULER & MANUAL)
+-- [F4] QUERY NOTIFIKASI OTOMATIS TUNGGAKAN KE ORANG TUA
 -- =============================================================================
 
--- F4.1: Query Pemicu Penjadwal Notifikasi (H-7, H-3, H-1, dan Overdue)
--- Digunakan oleh worker backend / cron scheduler harian
+-- F4.1: Penarik Data Pengingat Otomatis untuk Scheduler Cron
 SELECT
     sb.bill_id,
     s.student_id,
@@ -158,64 +147,38 @@ SELECT
     s.nis,
     c.nama_kelas,
     s.nama_orang_tua,
-    s.email_ortu,
     s.no_hp_ortu,
+    s.email_ortu,
     fs.fee_name,
     fs.due_date,
     sb.amount_due,
     (CURRENT_DATE - fs.due_date) AS hari_keterlambatan,
-    CASE
-        WHEN fs.due_date = CURRENT_DATE + INTERVAL '7 days' THEN 'REMINDER_H7'
-        WHEN fs.due_date = CURRENT_DATE + INTERVAL '3 days' THEN 'REMINDER_H3'
-        WHEN fs.due_date = CURRENT_DATE + INTERVAL '1 day' THEN 'REMINDER_H1'
-        WHEN fs.due_date = CURRENT_DATE THEN 'REMINDER_H0'
-        WHEN fs.due_date < CURRENT_DATE THEN 'OVERDUE_ALERT'
-    END AS notification_event,
-    -- Template Pesan WhatsApp Siap Kirim
     CONCAT(
         'Yth. ', s.nama_orang_tua, ', tagihan ', fs.fee_name, ' siswa an. ', s.nama,
-        ' (Kelas: ', c.nama_kelas, ', NIS: ', s.nis, ') memiliki sisa pembayaran sebesar Rp ',
-        TO_CHAR(sb.amount_due, 'FM999,999,999'), '. Jatuh tempo pada ',
+        ' (Kelas: ', c.nama_kelas, ') memiliki sisa tunggakan sebesar Rp ',
+        TO_CHAR(sb.amount_due, 'FM999,999,999'), '. Jatuh tempo: ',
         TO_CHAR(fs.due_date, 'DD/MM/YYYY'),
         CASE
-            WHEN fs.due_date < CURRENT_DATE THEN CONCAT(' (Telah lewat ', (CURRENT_DATE - fs.due_date), ' hari). Mohon segera melakukan pembayaran.')
-            ELSE '. Harap lakukan pembayaran sebelum tanggal jatuh tempo. Terima kasih.'
+            WHEN fs.due_date < CURRENT_DATE THEN ' (Telah melewati batas jatuh tempo). Mohon segera melakukan pembayaran.'
+            ELSE '. Harap selesaikan pembayaran sebelum tanggal jatuh tempo. Terima kasih.'
         END
-    ) AS formatted_message_wa
+    ) AS draft_pesan_whatsapp
 FROM student_bills sb
 JOIN students s ON sb.student_id = s.student_id
 JOIN classes c ON s.class_id = c.class_id
 JOIN fee_structures fs ON sb.fee_id = fs.fee_id
 WHERE sb.amount_due > 0
   AND (
-      fs.due_date IN (
-          CURRENT_DATE + INTERVAL '7 days',
-          CURRENT_DATE + INTERVAL '3 days',
-          CURRENT_DATE + INTERVAL '1 day',
-          CURRENT_DATE
-      )
-      OR (fs.due_date < CURRENT_DATE AND (CURRENT_DATE - fs.due_date) % 7 = 0) -- Kirim berkala tiap 7 hari keterlambatan
+      fs.due_date IN (CURRENT_DATE + INTERVAL '7 days', CURRENT_DATE + INTERVAL '3 days', CURRENT_DATE + INTERVAL '1 day', CURRENT_DATE)
+      OR (fs.due_date < CURRENT_DATE AND (CURRENT_DATE - fs.due_date) % 7 = 0)
   );
-
--- F4.2: Rekapitulasi Performa & Status Pengiriman Notifikasi
-SELECT
-    nl.channel,
-    nl.status_kirim,
-    COUNT(nl.notification_id) AS jumlah,
-    ROUND(
-        (COUNT(nl.notification_id)::NUMERIC / NULLIF(SUM(COUNT(nl.notification_id)) OVER(PARTITION BY nl.channel), 0)) * 100,
-        2
-    ) AS persentase_keberhasilan
-FROM notification_logs nl
-GROUP BY nl.channel, nl.status_kirim
-ORDER BY nl.channel, nl.status_kirim;
 
 
 -- =============================================================================
 -- [F5] MONITORING ALOKASI VS REALISASI ANGGARAN OPERASIONAL INSTITUSI
 -- =============================================================================
 
--- F5.1: Ringkasan Alokasi vs Realisasi Belanja per Kategori Anggaran
+-- F5.1: Pengawasan Penyerapan Anggaran per Kategori Belanja
 SELECT
     ba.allocation_id,
     ba.kategori AS kategori_anggaran,
@@ -237,17 +200,39 @@ LEFT JOIN budget_expenditures be ON ba.allocation_id = be.allocation_id
 GROUP BY ba.allocation_id, ba.kategori, ba.periode, ba.nominal_alokasi
 ORDER BY persentase_penyerapan DESC;
 
--- F5.2: Rincian Pengeluaran Terbesar per Kategori untuk Audit Institusi
-SELECT
-    be.expenditure_id,
-    ba.kategori,
-    be.deskripsi,
-    be.nominal,
-    be.tanggal,
-    be.bukti,
-    ROUND((be.nominal / ba.nominal_alokasi) * 100, 2) AS rasio_terhadap_alokasi
-FROM budget_expenditures be
-JOIN budget_allocations ba ON be.allocation_id = ba.allocation_id
-ORDER BY be.nominal DESC
-LIMIT 10;
 
+-- =============================================================================
+-- [F6] AUTENTIKASI, HAK AKSES RBAC (SUPER ADMIN, ADMIN, USER) & PENGATURAN WEB
+-- =============================================================================
+
+-- F6.1: Verifikasi Login Pengguna & Role Check
+SELECT
+    u.user_id,
+    u.username,
+    u.password_hash,
+    u.nama_lengkap,
+    u.email,
+    r.role_name,
+    u.student_id,
+    u.is_active
+FROM users u
+JOIN roles r ON u.role_id = r.role_id
+WHERE u.username = 'superadmin' AND u.is_active = true;
+
+-- F6.2: Mengambil Pengaturan Identitas & Rekening Website (Khusus Super Admin)
+SELECT
+    setting_id,
+    institution_name,
+    institution_motto,
+    academic_year,
+    system_date,
+    address,
+    phone,
+    whatsapp_contact,
+    email,
+    bank_accounts,
+    overdue_grace_days,
+    maintenance_mode,
+    updated_at
+FROM system_settings
+WHERE setting_id = 1;

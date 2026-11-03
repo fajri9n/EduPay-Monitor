@@ -12,6 +12,10 @@ export function DataProvider({ children }) {
   const [notificationLogs, setNotificationLogs] = useState([]);
   const [dashboardSummary, setDashboardSummary] = useState(null);
   const [systemSettings, setSystemSettings] = useState(null);
+  const [users, setUsers] = useState([]);
+  const [classes, setClasses] = useState([]);
+  const [students, setStudents] = useState([]);
+  const [feeStructures, setFeeStructures] = useState([]);
 
   // Filter global dashboard
   const [filterClass, setFilterClass] = useState('all');
@@ -21,13 +25,28 @@ export function DataProvider({ children }) {
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
-      const [billsData, txData, bgtData, notifData, summaryData, settingsData] = await Promise.all([
+      const [
+        billsData,
+        txData,
+        bgtData,
+        notifData,
+        summaryData,
+        settingsData,
+        usersData,
+        classesData,
+        studentsData,
+        feesData,
+      ] = await Promise.all([
         apiService.getBills(),
         apiService.getTransactions(),
         apiService.getBudgetData(),
         apiService.getNotificationLogs(),
         apiService.getDashboardSummary(filterClass, filterPeriod),
         apiService.getSystemSettings(),
+        apiService.getUsers(),
+        apiService.getClasses(),
+        apiService.getStudents(),
+        apiService.getFeeStructures(),
       ]);
 
       setBills(billsData);
@@ -36,6 +55,10 @@ export function DataProvider({ children }) {
       setNotificationLogs(notifData);
       setDashboardSummary(summaryData);
       setSystemSettings(settingsData);
+      setUsers(usersData);
+      setClasses(classesData);
+      setStudents(studentsData);
+      setFeeStructures(feesData);
     } catch (err) {
       console.error('Gagal memuat data sistem:', err);
     } finally {
@@ -47,10 +70,10 @@ export function DataProvider({ children }) {
     fetchData();
   }, [fetchData]);
 
-  // Actions
+  // Actions Realtime Transaksi & Verifikasi
   const verifyTransaction = async (transactionId, userId) => {
     await apiService.verifyTransaction(transactionId, userId);
-    await fetchData(); // Refresh state secara menyeluruh (dashboard, bills, transactions sinkron)
+    await fetchData(); // Refresh state secara menyeluruh (dashboard, bills, transactions, cash reports sinkron)
   };
 
   const rejectTransaction = async (transactionId, reason) => {
@@ -64,6 +87,7 @@ export function DataProvider({ children }) {
     return res;
   };
 
+  // Actions Realtime Notifikasi & Pengingat
   const sendNotification = async (billId, channel, customMessage) => {
     const res = await notificationService.sendSingle(billId, channel, customMessage);
     const updatedLogs = await apiService.getNotificationLogs();
@@ -78,10 +102,47 @@ export function DataProvider({ children }) {
     return res;
   };
 
+  // Actions Realtime Anggaran Operasional
   const addExpenditure = async (payload) => {
     const res = await apiService.addExpenditure(payload);
     const updatedBgt = await apiService.getBudgetData();
     setBudgetData(updatedBgt);
+    return res;
+  };
+
+  // Actions Realtime Manajemen Pengguna (User Management)
+  const createUser = async (payload) => {
+    const newUser = await apiService.createUser(payload);
+    const updatedUsers = await apiService.getUsers();
+    setUsers(updatedUsers);
+    return newUser;
+  };
+
+  const updateUser = async (userId, payload) => {
+    const updated = await apiService.updateUser(userId, payload);
+    const updatedUsers = await apiService.getUsers();
+    setUsers(updatedUsers);
+    return updated;
+  };
+
+  const updateUserRole = async (userId, newRole) => {
+    const updated = await apiService.updateUserRole(userId, newRole);
+    const updatedUsers = await apiService.getUsers();
+    setUsers(updatedUsers);
+    return updated;
+  };
+
+  const toggleUserStatus = async (userId) => {
+    const updated = await apiService.toggleUserStatus(userId);
+    const updatedUsers = await apiService.getUsers();
+    setUsers(updatedUsers);
+    return updated;
+  };
+
+  const deleteUser = async (userId) => {
+    const res = await apiService.deleteUser(userId);
+    const updatedUsers = await apiService.getUsers();
+    setUsers(updatedUsers);
     return res;
   };
 
@@ -106,6 +167,10 @@ export function DataProvider({ children }) {
         dashboardSummary,
         systemSettings,
         updateSystemSettings,
+        users,
+        classes,
+        students,
+        feeStructures,
         filterClass,
         setFilterClass,
         filterPeriod,
@@ -118,6 +183,11 @@ export function DataProvider({ children }) {
         sendNotification,
         sendBulkNotifications,
         addExpenditure,
+        createUser,
+        updateUser,
+        updateUserRole,
+        toggleUserStatus,
+        deleteUser,
       }}
     >
       {children}

@@ -29,9 +29,11 @@ export default function Sidebar({
   const { overdueCount, systemSettings } = useData();
 
   // Definisi navigasi dengan batasan otorisasi peran
+  const isUserRole = currentUser?.role === 'user';
+
   const navigationItems = [
     {
-      name: 'Dashboard Utama',
+      name: isUserRole ? 'Dashboard Saya' : 'Dashboard Utama',
       path: '/',
       icon: LayoutDashboard,
       allowedRoles: ['super_admin', 'admin', 'user'],
@@ -45,7 +47,7 @@ export default function Sidebar({
       allowedRoles: ['super_admin', 'admin'],
     },
     {
-      name: 'Tagihan Siswa',
+      name: isUserRole ? 'Tagihan Saya' : 'Kelola Tagihan Siswa',
       path: '/bills',
       icon: Receipt,
       allowedRoles: ['super_admin', 'admin', 'user'],

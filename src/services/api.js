@@ -600,6 +600,138 @@ export const apiService = {
     throw new Error('User tidak ditemukan.');
   },
 
+  async updateUser(userId, payload) {
+    await simulateDelay();
+    const idx = state.users.findIndex((u) => u.user_id === userId);
+    if (idx !== -1) {
+      const roleLabels = {
+        super_admin: 'Super Administrator (Akses Penuh)',
+        admin: 'Administrator',
+        user: 'User / Siswa',
+      };
+      state.users[idx] = {
+        ...state.users[idx],
+        ...payload,
+        role_name: roleLabels[payload.role || state.users[idx].role] || state.users[idx].role_name,
+      };
+      return state.users[idx];
+    }
+    throw new Error('User tidak ditemukan.');
+  },
+
+  // ---------------------------------------------------------------------------
+  // MASTER DATA: CLASSES, STUDENTS, FEE STRUCTURES
+  // ---------------------------------------------------------------------------
+  async getClasses() {
+    await simulateDelay(30);
+    return [...state.classes];
+  },
+
+  async getStudents() {
+    await simulateDelay(50);
+    return [...state.students];
+  },
+
+  async getFeeStructures() {
+    await simulateDelay(40);
+    return [...state.feeStructures];
+  },
+
+  // ---------------------------------------------------------------------------
+  // LAPORAN KAS (HARIAN & BULANAN) - HANYA VERIFIED
+  // ---------------------------------------------------------------------------
+  async getCashReport({ mode = 'monthly', date = '2026-11-03', month = '2026-11' } = {}) {
+    await simulateDelay(80);
+
+    // Ambil semua transaksi Verified dengan rincian siswa & tagihan
+    const verifiedTx = state.transactions
+      .filter((t) => t.verification_status === 'Verified')
+      .map((t) => {
+        const bill = state.bills.find((b) => b.bill_id === t.bill_id);
+        const student = bill ? state.students.find((s) => s.student_id === bill.student_id) : null;
+        const fee = bill ? state.feeStructures.find((f) => f.fee_id === bill.fee_id) : null;
+        return {
+          ...t,
+          bill,
+          student,
+          fee,
+        };
+      });
+
+    if (mode === 'daily') {
+      const dailyTx = verifiedTx.filter((t) => t.transaction_date.startsWith(date));
+      const totalPenerimaan = dailyTx.reduce((sum, t) => sum + Number(t.amount_paid), 0);
+      const totalTransaksi = dailyTx.length;
+      const rataRata = totalTransaksi > 0 ? Math.round(totalPenerimaan / totalTransaksi) : 0;
+
+      // Breakdown per metode bayar
+      const methodMap = { 'Transfer Bank': 0, 'E-Wallet': 0, Cash: 0 };
+      dailyTx.forEach((t) => {
+        if (methodMap[t.payment_method] !== undefined) {
+          methodMap[t.payment_method] += Number(t.amount_paid);
+        }
+      });
+
+      return {
+        mode: 'daily',
+        period: date,
+        totalPenerimaan,
+        totalTransaksi,
+        rataRata,
+        methodBreakdown: Object.entries(methodMap).map(([method, total]) => ({
+          method,
+          total,
+          percentage: totalPenerimaan > 0 ? Number(((total / totalPenerimaan) * 100).toFixed(1)) : 0,
+        })),
+        transactions: dailyTx.sort((a, b) => new Date(b.transaction_date) - new Date(a.transaction_date)),
+      };
+    } else {
+      // Monthly mode
+      const monthlyTx = verifiedTx.filter((t) => t.transaction_date.startsWith(month));
+      const totalPenerimaan = monthlyTx.reduce((sum, t) => sum + Number(t.amount_paid), 0);
+      const totalTransaksi = monthlyTx.length;
+      const rataRata = totalTransaksi > 0 ? Math.round(totalPenerimaan / totalTransaksi) : 0;
+
+      // Breakdown per hari dalam bulan untuk grafik
+      const daysInMonth = 30; // atau hitung berdasarkan bulan
+      const dailyTrend = [];
+      for (let day = 1; day <= daysInMonth; day++) {
+        const dayStr = `${month}-${String(day).padStart(2, '0')}`;
+        const dayTxs = monthlyTx.filter((t) => t.transaction_date.startsWith(dayStr));
+        const dayTotal = dayTxs.reduce((sum, t) => sum + Number(t.amount_paid), 0);
+        dailyTrend.push({
+          date: dayStr,
+          day: `${day}`,
+          total: dayTotal,
+          count: dayTxs.length,
+        });
+      }
+
+      // Breakdown per metode bayar
+      const methodMap = { 'Transfer Bank': 0, 'E-Wallet': 0, Cash: 0 };
+      monthlyTx.forEach((t) => {
+        if (methodMap[t.payment_method] !== undefined) {
+          methodMap[t.payment_method] += Number(t.amount_paid);
+        }
+      });
+
+      return {
+        mode: 'monthly',
+        period: month,
+        totalPenerimaan,
+        totalTransaksi,
+        rataRata,
+        dailyTrend,
+        methodBreakdown: Object.entries(methodMap).map(([method, total]) => ({
+          method,
+          total,
+          percentage: totalPenerimaan > 0 ? Number(((total / totalPenerimaan) * 100).toFixed(1)) : 0,
+        })),
+        transactions: monthlyTx.sort((a, b) => new Date(b.transaction_date) - new Date(a.transaction_date)),
+      };
+    }
+  },
+
   // ---------------------------------------------------------------------------
   // KONTROL TOTAL WEBSITE / SETTINGS (KHUSUS SUPER ADMIN)
   // ---------------------------------------------------------------------------
