@@ -9,5 +9,5 @@
 4. Nafisah Dwi Rizqiyani
 5. Nayla Vilova Tivani
 6. Eza Lisetiawan
-7. Safira Khoirunisa
+7. Shafira Khoirunnisa
 
