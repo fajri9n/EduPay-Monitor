@@ -15,6 +15,7 @@ import CashReports from './pages/CashReports';
 import Budget from './pages/Budget';
 import Notifications from './pages/Notifications';
 import Users from './pages/Users';
+import Students from './pages/Students';
 import SystemSettings from './pages/SystemSettings';
 
 // Route Guard dengan Privilege Super Admin
@@ -67,6 +68,14 @@ export default function App() {
                   }
                 />
                 <Route path="bills" element={<Bills />} />
+                <Route
+                  path="students"
+                  element={
+                    <ProtectedRoute allowedRoles={['admin', 'super_admin']}>
+                      <Students />
+                    </ProtectedRoute>
+                  }
+                />
                 <Route
                   path="transactions"
                   element={

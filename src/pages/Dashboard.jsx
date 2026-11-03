@@ -46,8 +46,13 @@ import {
   Copy,
   Check,
   RotateCcw,
+  Phone,
+  Mail,
+  ExternalLink,
+  MessageSquare,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { createWhatsAppUrl, createMailtoUrl, createSmsUrl } from '../utils/notificationUtils';
 
 // Custom Tooltip untuk Grafik Status per Kelas
 const ClassStatusTooltip = ({ active, payload, label }) => {
@@ -135,12 +140,17 @@ export default function Dashboard() {
     setFilterPeriod,
     sendNotification,
     recordTransaction,
+    updateStudentContact,
   } = useData();
 
   // State Reminder Modal
   const [selectedBillForReminder, setSelectedBillForReminder] = useState(null);
-  const [reminderChannel, setReminderChannel] = useState('WhatsApp');
+  const [reminderChannel, setReminderChannel] = useState('WhatsApp'); // 'WhatsApp' | 'Email' | 'Both'
+  const [customPhone, setCustomPhone] = useState('');
+  const [customEmail, setCustomEmail] = useState('');
+  const [customSubject, setCustomSubject] = useState('');
   const [customReminderMessage, setCustomReminderMessage] = useState('');
+  const [saveContactCheckbox, setSaveContactCheckbox] = useState(true);
   const [sendingReminder, setSendingReminder] = useState(false);
   const [reminderSuccess, setReminderSuccess] = useState(false);
 
@@ -201,6 +211,9 @@ export default function Dashboard() {
   const handleOpenReminder = (bill) => {
     setSelectedBillForReminder(bill);
     setReminderChannel('WhatsApp');
+    setCustomPhone(bill.student?.no_hp_ortu || '0812-3456-7890');
+    setCustomEmail(bill.student?.email_ortu || 'ortu@gmail.com');
+    setCustomSubject(`Pengingat Tagihan SPP - ${bill.fee?.fee_name} (${bill.student?.nama})`);
     const defaultMsg = notificationService.generateMessage(bill, 'WhatsApp');
     setCustomReminderMessage(defaultMsg);
     setReminderSuccess(false);
@@ -210,7 +223,10 @@ export default function Dashboard() {
   const handleChannelChange = (channel) => {
     setReminderChannel(channel);
     if (selectedBillForReminder) {
-      const msg = notificationService.generateMessage(selectedBillForReminder, channel);
+      const msg = notificationService.generateMessage(
+        selectedBillForReminder,
+        channel === 'Email' ? 'Email' : 'WhatsApp'
+      );
       setCustomReminderMessage(msg);
     }
   };
@@ -220,11 +236,30 @@ export default function Dashboard() {
     if (!selectedBillForReminder) return;
     try {
       setSendingReminder(true);
-      await sendNotification(
-        selectedBillForReminder.bill_id,
-        reminderChannel,
-        customReminderMessage
-      );
+
+      if (saveContactCheckbox && selectedBillForReminder.student_id) {
+        await updateStudentContact(selectedBillForReminder.student_id, {
+          no_hp_ortu: customPhone,
+          email_ortu: customEmail,
+        });
+      }
+
+      if (reminderChannel === 'Both' || reminderChannel === 'WhatsApp') {
+        await sendNotification(
+          selectedBillForReminder.bill_id,
+          'WhatsApp',
+          customReminderMessage,
+          customPhone
+        );
+      }
+      if (reminderChannel === 'Both' || reminderChannel === 'Email') {
+        await sendNotification(
+          selectedBillForReminder.bill_id,
+          'Email',
+          customReminderMessage,
+          customEmail
+        );
+      }
       setReminderSuccess(true);
       setTimeout(() => {
         setSelectedBillForReminder(null);
@@ -235,6 +270,60 @@ export default function Dashboard() {
     } finally {
       setSendingReminder(false);
     }
+  };
+
+  const handleDirectWhatsApp = async () => {
+    if (!selectedBillForReminder) return;
+    const url = createWhatsAppUrl(customPhone, customReminderMessage);
+    window.open(url, '_blank');
+    if (saveContactCheckbox && selectedBillForReminder.student_id) {
+      updateStudentContact(selectedBillForReminder.student_id, {
+        no_hp_ortu: customPhone,
+        email_ortu: customEmail,
+      });
+    }
+    sendNotification(selectedBillForReminder.bill_id, 'WhatsApp', customReminderMessage, customPhone);
+    setReminderSuccess(true);
+    setTimeout(() => {
+      setSelectedBillForReminder(null);
+      setReminderSuccess(false);
+    }, 1500);
+  };
+
+  const handleDirectSms = () => {
+    if (!selectedBillForReminder) return;
+    const url = createSmsUrl(customPhone, customReminderMessage);
+    window.location.href = url;
+    if (saveContactCheckbox && selectedBillForReminder.student_id) {
+      updateStudentContact(selectedBillForReminder.student_id, {
+        no_hp_ortu: customPhone,
+        email_ortu: customEmail,
+      });
+    }
+    sendNotification(selectedBillForReminder.bill_id, 'WhatsApp', customReminderMessage, customPhone);
+    setReminderSuccess(true);
+    setTimeout(() => {
+      setSelectedBillForReminder(null);
+      setReminderSuccess(false);
+    }, 1500);
+  };
+
+  const handleDirectEmail = () => {
+    if (!selectedBillForReminder) return;
+    const url = createMailtoUrl(customEmail, customSubject, customReminderMessage);
+    window.location.href = url;
+    if (saveContactCheckbox && selectedBillForReminder.student_id) {
+      updateStudentContact(selectedBillForReminder.student_id, {
+        no_hp_ortu: customPhone,
+        email_ortu: customEmail,
+      });
+    }
+    sendNotification(selectedBillForReminder.bill_id, 'Email', customReminderMessage, customEmail);
+    setReminderSuccess(true);
+    setTimeout(() => {
+      setSelectedBillForReminder(null);
+      setReminderSuccess(false);
+    }, 1500);
   };
 
   // Handler Copy Rekening
@@ -1114,34 +1203,83 @@ export default function Dashboard() {
                 {/* Pemilih Channel */}
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                    Pilih Saluran Pengiriman:
+                    Pilih Saluran Notifikasi:
                   </label>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-3 gap-2">
                     <button
                       type="button"
                       onClick={() => handleChannelChange('WhatsApp')}
-                      className={`p-3 rounded-xl border text-xs font-semibold flex items-center justify-center gap-2 transition-all ${
+                      className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
                         reminderChannel === 'WhatsApp'
-                          ? 'border-emerald-500 bg-emerald-50/60 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300'
+                          ? 'border-emerald-500 bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 shadow-xs'
                           : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'
                       }`}
                     >
-                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-                      WhatsApp Otomatis
+                      <Phone className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>WhatsApp / HP</span>
                     </button>
                     <button
                       type="button"
                       onClick={() => handleChannelChange('Email')}
-                      className={`p-3 rounded-xl border text-xs font-semibold flex items-center justify-center gap-2 transition-all ${
+                      className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
                         reminderChannel === 'Email'
-                          ? 'border-indigo-500 bg-indigo-50/60 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300'
+                          ? 'border-indigo-500 bg-indigo-50 text-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-300 shadow-xs'
                           : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'
                       }`}
                     >
-                      <span className="w-2.5 h-2.5 rounded-full bg-indigo-500" />
-                      Email Resmi Institusi
+                      <Mail className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>Email Resmi</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleChannelChange('Both')}
+                      className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                        reminderChannel === 'Both'
+                          ? 'border-purple-500 bg-purple-50 text-purple-800 dark:bg-purple-950/40 dark:text-purple-300 shadow-xs'
+                          : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                      <span>Keduanya</span>
                     </button>
                   </div>
+                </div>
+
+                {/* Input Nomor Telepon & Email Tujuan */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {(reminderChannel === 'WhatsApp' || reminderChannel === 'Both') && (
+                    <div className={reminderChannel === 'WhatsApp' ? 'md:col-span-2' : ''}>
+                      <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1">
+                        <Phone className="w-3.5 h-3.5 text-emerald-600" />
+                        Nomor WhatsApp / HP Tujuan:
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={customPhone}
+                        onChange={(e) => setCustomPhone(e.target.value)}
+                        placeholder="Contoh: 0812-3456-7890"
+                        className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-mono font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+                  )}
+
+                  {(reminderChannel === 'Email' || reminderChannel === 'Both') && (
+                    <div className={reminderChannel === 'Email' ? 'md:col-span-2' : ''}>
+                      <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1">
+                        <Mail className="w-3.5 h-3.5 text-indigo-600" />
+                        Alamat Email Tujuan:
+                      </label>
+                      <input
+                        type="email"
+                        required
+                        value={customEmail}
+                        onChange={(e) => setCustomEmail(e.target.value)}
+                        placeholder="Contoh: wali.siswa@gmail.com"
+                        className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-medium text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                  )}
                 </div>
 
                 {/* Pratinjau & Edit Isi Pesan */}
@@ -1157,25 +1295,80 @@ export default function Dashboard() {
                   />
                 </div>
 
-                <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setSelectedBillForReminder(null)}
-                    disabled={sendingReminder}
-                  >
-                    Batal
-                  </Button>
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    onClick={handleSendReminder}
-                    disabled={sendingReminder}
-                    className="bg-indigo-600 hover:bg-indigo-700 text-white"
-                  >
-                    <Send className="w-3.5 h-3.5 mr-1.5" />
-                    {sendingReminder ? 'Mengirim...' : 'Kirim Sekarang (Simulasi)'}
-                  </Button>
+                {/* Checkbox Simpan Kontak Permanen */}
+                <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
+                  <label className="flex items-center gap-2 cursor-pointer select-none text-xs text-slate-700 dark:text-slate-300">
+                    <input
+                      type="checkbox"
+                      checked={saveContactCheckbox}
+                      onChange={(e) => setSaveContactCheckbox(e.target.checked)}
+                      className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
+                    />
+                    <span className="font-medium">
+                      Perbarui nomor telepon & email ini ke profil database siswa secara permanen
+                    </span>
+                  </label>
+                </div>
+
+                {/* Tombol Aksi Nyata & Sistem */}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {(reminderChannel === 'WhatsApp' || reminderChannel === 'Both') && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={handleDirectWhatsApp}
+                          className="px-3 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 border border-emerald-300 dark:border-emerald-800 text-xs font-bold flex items-center justify-center gap-1.5 transition-all"
+                          title="Buka WhatsApp Web / Aplikasi langsung dengan pesan ini"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5 text-emerald-600" />
+                          Buka di WhatsApp (wa.me)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleDirectSms}
+                          className="px-2.5 py-1.5 rounded-xl bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 hover:bg-teal-100 border border-teal-300 dark:border-teal-800 text-xs font-bold flex items-center justify-center gap-1.5 transition-all"
+                          title="Buka aplikasi SMS di perangkat"
+                        >
+                          <MessageSquare className="w-3.5 h-3.5 text-teal-600" />
+                          Kirim SMS
+                        </button>
+                      </>
+                    )}
+
+                    {(reminderChannel === 'Email' || reminderChannel === 'Both') && (
+                      <button
+                        type="button"
+                        onClick={handleDirectEmail}
+                        className="px-3 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 border border-indigo-300 dark:border-indigo-800 text-xs font-bold flex items-center justify-center gap-1.5 transition-all"
+                        title="Buka aplikasi email langsung"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5 text-indigo-600" />
+                        Buka Aplikasi Email
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSelectedBillForReminder(null)}
+                      disabled={sendingReminder}
+                    >
+                      Batal
+                    </Button>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={handleSendReminder}
+                      disabled={sendingReminder}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white"
+                    >
+                      <Send className="w-3.5 h-3.5 mr-1.5" />
+                      {sendingReminder ? 'Mengirim...' : 'Kirim & Catat ke Sistem'}
+                    </Button>
+                  </div>
                 </div>
               </>
             )}

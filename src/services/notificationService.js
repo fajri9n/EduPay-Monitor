@@ -64,8 +64,8 @@ export const notificationService = {
   /**
    * Kirim notifikasi tunggal (simulasi)
    */
-  async sendSingle(billId, channel, customMessage = null) {
-    return apiService.sendNotification(billId, channel, customMessage);
+  async sendSingle(billId, channel, customMessage = null, customRecipient = null) {
+    return apiService.sendNotification(billId, channel, customMessage, customRecipient);
   },
 
   /**

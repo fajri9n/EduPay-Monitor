@@ -22,11 +22,13 @@ import {
   Sparkles,
   MessageSquare,
   Plus,
+  ExternalLink,
 } from 'lucide-react';
+import { createWhatsAppUrl, createMailtoUrl, createSmsUrl } from '../utils/notificationUtils';
 
 export default function Notifications() {
   const { isSuperAdmin, isAdmin } = useAuth();
-  const { notificationLogs, bills, sendNotification } = useData();
+  const { notificationLogs, bills, sendNotification, updateStudentContact } = useData();
 
   // Filter State
   const [searchQuery, setSearchQuery] = useState('');
@@ -38,6 +40,7 @@ export default function Notifications() {
   const [showManualModal, setShowManualModal] = useState(false);
   const [manualBillId, setManualBillId] = useState('');
   const [manualChannel, setManualChannel] = useState('WhatsApp');
+  const [manualRecipient, setManualRecipient] = useState('');
   const [manualMessage, setManualMessage] = useState('');
   const [submittingManual, setSubmittingManual] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
@@ -85,10 +88,23 @@ export default function Notifications() {
 
     try {
       setSubmittingManual(true);
-      await sendNotification(Number(manualBillId), manualChannel, manualMessage);
+      await sendNotification(Number(manualBillId), manualChannel, manualMessage, manualRecipient);
+
+      // Sinkronkan kontak ke profil siswa
+      const bill = bills.find((b) => b.bill_id === Number(manualBillId));
+      if (bill?.student_id && manualRecipient.trim()) {
+        await updateStudentContact(
+          bill.student_id,
+          manualChannel === 'WhatsApp'
+            ? { no_hp_ortu: manualRecipient.trim() }
+            : { email_ortu: manualRecipient.trim() }
+        );
+      }
+
       setShowManualModal(false);
       setManualBillId('');
       setManualMessage('');
+      setManualRecipient('');
       triggerToast(`Notifikasi manual (${manualChannel}) berhasil dikirimkan!`);
     } catch (err) {
       alert('Gagal mengirim notifikasi: ' + err.message);
@@ -417,7 +433,48 @@ export default function Notifications() {
               </div>
             </div>
 
-            <div className="flex justify-end pt-2">
+            <div className="flex items-center justify-between pt-2 border-t border-slate-200 dark:border-slate-800">
+              <div className="flex items-center gap-2 flex-wrap">
+                {viewingLog.channel === 'WhatsApp' ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const url = createWhatsAppUrl(viewingLog.recipient, viewingLog.isi_pesan);
+                        window.open(url, '_blank');
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 border border-emerald-300 dark:border-emerald-800 text-xs font-bold flex items-center gap-1.5"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5 text-emerald-600" />
+                      Buka WhatsApp (wa.me)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const url = createSmsUrl(viewingLog.recipient, viewingLog.isi_pesan);
+                        window.location.href = url;
+                      }}
+                      className="px-2.5 py-1.5 rounded-xl bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 hover:bg-teal-100 border border-teal-300 dark:border-teal-800 text-xs font-bold flex items-center gap-1.5"
+                    >
+                      <MessageSquare className="w-3.5 h-3.5 text-teal-600" />
+                      Kirim SMS
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const url = createMailtoUrl(viewingLog.recipient, 'Pengingat Tagihan SPP', viewingLog.isi_pesan);
+                      window.location.href = url;
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 border border-indigo-300 dark:border-indigo-800 text-xs font-bold flex items-center gap-1.5"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5 text-indigo-600" />
+                    Buka Aplikasi Email
+                  </button>
+                )}
+              </div>
+
               <Button variant="outline" size="sm" onClick={() => setViewingLog(null)}>
                 Tutup
               </Button>
@@ -474,12 +531,37 @@ export default function Notifications() {
               </label>
               <select
                 value={manualChannel}
-                onChange={(e) => setManualChannel(e.target.value)}
+                onChange={(e) => {
+                  const ch = e.target.value;
+                  setManualChannel(ch);
+                  if (manualBillId) {
+                    const bill = bills.find((b) => b.bill_id === Number(manualBillId));
+                    if (bill) {
+                      setManualRecipient(
+                        ch === 'WhatsApp' ? bill.student?.no_hp_ortu || '' : bill.student?.email_ortu || ''
+                      );
+                    }
+                  }
+                }}
                 className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-medium text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
               >
-                <option value="WhatsApp">WhatsApp Gateway</option>
+                <option value="WhatsApp">WhatsApp Gateway / HP</option>
                 <option value="Email">Email SMTP Sekolah</option>
               </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                {manualChannel === 'WhatsApp' ? 'Nomor WhatsApp Tujuan (HP):' : 'Alamat Email Tujuan:'}
+              </label>
+              <input
+                type="text"
+                required
+                value={manualRecipient}
+                onChange={(e) => setManualRecipient(e.target.value)}
+                placeholder={manualChannel === 'WhatsApp' ? 'Contoh: 0812-3456-7890' : 'ortu@gmail.com'}
+                className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-mono font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
             </div>
 
             <div>
@@ -496,24 +578,79 @@ export default function Notifications() {
               />
             </div>
 
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setShowManualModal(false)}
-                disabled={submittingManual}
-              >
-                Batal
-              </Button>
-              <Button
-                type="submit"
-                size="sm"
-                disabled={submittingManual}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white"
-              >
-                {submittingManual ? 'Mengirim...' : 'Kirim Notifikasi'}
-              </Button>
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2 flex-wrap">
+                {manualChannel === 'WhatsApp' ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!manualRecipient) {
+                          alert('Isi nomor WhatsApp tujuan terlebih dahulu.');
+                          return;
+                        }
+                        const url = createWhatsAppUrl(manualRecipient, manualMessage);
+                        window.open(url, '_blank');
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-300 text-xs font-bold flex items-center gap-1.5"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      Buka WhatsApp Langsung
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!manualRecipient) {
+                          alert('Isi nomor telepon tujuan terlebih dahulu.');
+                          return;
+                        }
+                        const url = createSmsUrl(manualRecipient, manualMessage);
+                        window.location.href = url;
+                      }}
+                      className="px-2.5 py-1.5 rounded-xl bg-teal-50 text-teal-700 border border-teal-300 text-xs font-bold flex items-center gap-1.5"
+                    >
+                      <MessageSquare className="w-3.5 h-3.5 text-teal-600" />
+                      Kirim SMS
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!manualRecipient) {
+                        alert('Isi alamat email tujuan terlebih dahulu.');
+                        return;
+                      }
+                      const url = createMailtoUrl(manualRecipient, 'Pengingat Tagihan SPP', manualMessage);
+                      window.location.href = url;
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-indigo-50 text-indigo-700 border border-indigo-300 text-xs font-bold flex items-center gap-1.5"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    Buka Email Langsung
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowManualModal(false)}
+                  disabled={submittingManual}
+                >
+                  Batal
+                </Button>
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={submittingManual || !manualBillId}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white"
+                >
+                  {submittingManual ? 'Mengirim...' : 'Kirim & Catat ke Sistem'}
+                </Button>
+              </div>
             </div>
           </form>
         </Modal>

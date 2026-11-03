@@ -8,6 +8,8 @@ import { useData } from '../context/DataContext';
 import { formatRupiah } from '../utils/formatRupiah';
 import { formatDate, getDueCountdown, getDaysDifference } from '../utils/formatDate';
 import { exportToCsv } from '../utils/exportCsv';
+import { createWhatsAppUrl, createMailtoUrl, createSmsUrl } from '../utils/notificationUtils';
+import { notificationService } from '../services/notificationService';
 import {
   Receipt,
   Search,
@@ -29,7 +31,12 @@ import {
   ShieldCheck,
   Building2,
   Upload,
-  Calendar
+  Calendar,
+  ExternalLink,
+  Phone,
+  Mail,
+  MessageSquare,
+  Sparkles,
 } from 'lucide-react';
 
 export default function Bills() {
@@ -39,6 +46,7 @@ export default function Bills() {
     systemSettings,
     sendNotification,
     recordTransaction,
+    updateStudentContact,
     refreshData,
   } = useData();
 
@@ -64,7 +72,22 @@ export default function Bills() {
 
   // Form Kirim Pengingat State (Untuk Admin / Super Admin)
   const [reminderChannel, setReminderChannel] = useState('WhatsApp');
+  const [reminderCustomPhone, setReminderCustomPhone] = useState('');
+  const [reminderCustomEmail, setReminderCustomEmail] = useState('');
+  const [reminderCustomSubject, setReminderCustomSubject] = useState('');
+  const [reminderCustomMessage, setReminderCustomMessage] = useState('');
+  const [reminderSaveContact, setReminderSaveContact] = useState(true);
   const [reminderSending, setReminderSending] = useState(false);
+
+  // Modal Ubah Kontak Orang Tua Siswa
+  const [showEditContactModal, setShowEditContactModal] = useState(false);
+  const [editingStudent, setEditingStudent] = useState(null);
+  const [contactForm, setContactForm] = useState({
+    nama_orang_tua: '',
+    no_hp_ortu: '',
+    email_ortu: '',
+  });
+  const [savingContact, setSavingContact] = useState(false);
 
   // Form Tambah Tagihan Baru (Khusus Super Admin)
   const [newBillForm, setNewBillForm] = useState({
@@ -158,19 +181,149 @@ export default function Bills() {
     }
   };
 
+  const handleOpenEditContact = (student) => {
+    if (!student) return;
+    setEditingStudent(student);
+    setContactForm({
+      nama_orang_tua: student.nama_orang_tua || '',
+      no_hp_ortu: student.no_hp_ortu || '',
+      email_ortu: student.email_ortu || '',
+    });
+    setShowEditContactModal(true);
+  };
+
+  const handleSaveContact = async (e) => {
+    if (e) e.preventDefault();
+    if (!editingStudent) return;
+    try {
+      setSavingContact(true);
+      await updateStudentContact(editingStudent.student_id, contactForm);
+      setShowEditContactModal(false);
+      alert(`Kontak orang tua siswa ${editingStudent.nama} berhasil diperbarui!`);
+      if (selectedBillForDetail && selectedBillForDetail.student?.student_id === editingStudent.student_id) {
+        setSelectedBillForDetail({
+          ...selectedBillForDetail,
+          student: {
+            ...selectedBillForDetail.student,
+            ...contactForm,
+          },
+        });
+      }
+    } catch (err) {
+      alert('Gagal memperbarui kontak: ' + err.message);
+    } finally {
+      setSavingContact(false);
+    }
+  };
+
   // Handler Kirim Pengingat Tunggakan oleh Admin
+  const handleOpenReminderModal = (bill) => {
+    setSelectedBillForReminder(bill);
+    setReminderChannel('WhatsApp');
+    setReminderCustomPhone(bill.student?.no_hp_ortu || '0812-3456-7890');
+    setReminderCustomEmail(bill.student?.email_ortu || 'wali.siswa@gmail.com');
+    setReminderCustomSubject(`Pengingat Tagihan SPP - ${bill.fee?.fee_name} (${bill.student?.nama})`);
+    const msg = notificationService.generateMessage(bill, 'WhatsApp');
+    setReminderCustomMessage(msg);
+    setReminderSaveContact(true);
+  };
+
+  const handleReminderChannelChange = (ch) => {
+    setReminderChannel(ch);
+    if (selectedBillForReminder) {
+      const msg = notificationService.generateMessage(
+        selectedBillForReminder,
+        ch === 'Email' ? 'Email' : 'WhatsApp'
+      );
+      setReminderCustomMessage(msg);
+    }
+  };
+
   const handleSendReminder = async () => {
     if (!selectedBillForReminder) return;
     setReminderSending(true);
     try {
-      await sendNotification(selectedBillForReminder.bill_id, reminderChannel);
+      if (reminderSaveContact && selectedBillForReminder.student_id) {
+        await updateStudentContact(selectedBillForReminder.student_id, {
+          no_hp_ortu: reminderCustomPhone,
+          email_ortu: reminderCustomEmail,
+        });
+      }
+
+      if (reminderChannel === 'Both' || reminderChannel === 'WhatsApp') {
+        await sendNotification(
+          selectedBillForReminder.bill_id,
+          'WhatsApp',
+          reminderCustomMessage,
+          reminderCustomPhone
+        );
+      }
+
+      if (reminderChannel === 'Both' || reminderChannel === 'Email') {
+        await sendNotification(
+          selectedBillForReminder.bill_id,
+          'Email',
+          reminderCustomMessage,
+          reminderCustomEmail
+        );
+      }
+
       setReminderSending(false);
-      alert(`Pengingat ${reminderChannel} berhasil dikirim ke orang tua ${selectedBillForReminder.student.nama}!`);
+      alert(
+        reminderChannel === 'Both'
+          ? `Pengingat WhatsApp & Email berhasil dikirimkan ke orang tua!`
+          : `Pengingat ${reminderChannel} berhasil dikirimkan!`
+      );
       setSelectedBillForReminder(null);
     } catch (err) {
       setReminderSending(false);
       alert('Gagal mengirim notifikasi: ' + err.message);
     }
+  };
+
+  const handleDirectWhatsApp = async () => {
+    if (!selectedBillForReminder) return;
+    const url = createWhatsAppUrl(reminderCustomPhone, reminderCustomMessage);
+    window.open(url, '_blank');
+    if (reminderSaveContact && selectedBillForReminder.student_id) {
+      updateStudentContact(selectedBillForReminder.student_id, {
+        no_hp_ortu: reminderCustomPhone,
+        email_ortu: reminderCustomEmail,
+      });
+    }
+    sendNotification(selectedBillForReminder.bill_id, 'WhatsApp', reminderCustomMessage, reminderCustomPhone);
+    setSelectedBillForReminder(null);
+    alert(`Membuka WhatsApp ke ${reminderCustomPhone} & dicatat ke sistem.`);
+  };
+
+  const handleDirectSms = () => {
+    if (!selectedBillForReminder) return;
+    const url = createSmsUrl(reminderCustomPhone, reminderCustomMessage);
+    window.location.href = url;
+    if (reminderSaveContact && selectedBillForReminder.student_id) {
+      updateStudentContact(selectedBillForReminder.student_id, {
+        no_hp_ortu: reminderCustomPhone,
+        email_ortu: reminderCustomEmail,
+      });
+    }
+    sendNotification(selectedBillForReminder.bill_id, 'WhatsApp', reminderCustomMessage, reminderCustomPhone);
+    setSelectedBillForReminder(null);
+    alert(`Membuka SMS ke ${reminderCustomPhone} & dicatat ke sistem.`);
+  };
+
+  const handleDirectEmail = () => {
+    if (!selectedBillForReminder) return;
+    const url = createMailtoUrl(reminderCustomEmail, reminderCustomSubject, reminderCustomMessage);
+    window.location.href = url;
+    if (reminderSaveContact && selectedBillForReminder.student_id) {
+      updateStudentContact(selectedBillForReminder.student_id, {
+        no_hp_ortu: reminderCustomPhone,
+        email_ortu: reminderCustomEmail,
+      });
+    }
+    sendNotification(selectedBillForReminder.bill_id, 'Email', reminderCustomMessage, reminderCustomEmail);
+    setSelectedBillForReminder(null);
+    alert(`Membuka aplikasi email ke ${reminderCustomEmail} & dicatat ke sistem.`);
   };
 
   // Handler Ekspor CSV
@@ -471,6 +624,19 @@ export default function Bills() {
                           <div className="text-[11px] text-slate-400 font-mono">
                             {b.student?.nis} • Kelas {b.student?.kelas}
                           </div>
+                          <div className="text-[10px] text-slate-500 mt-1 flex items-center gap-1.5 flex-wrap">
+                            <span>Wali: {b.student?.nama_orang_tua}</span>
+                            <span className="font-mono text-emerald-600 dark:text-emerald-400 font-semibold">({b.student?.no_hp_ortu})</span>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditContact(b.student)}
+                              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] bg-slate-100 hover:bg-indigo-50 dark:bg-slate-800 dark:hover:bg-indigo-950 text-slate-600 hover:text-indigo-600 border border-slate-200 dark:border-slate-700 transition-colors font-medium"
+                              title="Ubah nomor telepon & email wali"
+                            >
+                              <Edit3 className="w-2.5 h-2.5 text-indigo-500" />
+                              <span>Ubah Kontak</span>
+                            </button>
+                          </div>
                         </td>
                       )}
 
@@ -569,7 +735,7 @@ export default function Bills() {
                                 <Button
                                   size="sm"
                                   variant="secondary"
-                                  onClick={() => setSelectedBillForReminder(b)}
+                                  onClick={() => handleOpenReminderModal(b)}
                                   title="Kirim Notifikasi Pengingat ke Orang Tua"
                                   className="text-amber-700 hover:text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200"
                                 >
@@ -774,33 +940,100 @@ export default function Bills() {
         >
           <div className="space-y-5">
             {/* Informasi Siswa & Orang Tua */}
-            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
-              <div>
-                <span className="text-slate-400 block text-[10px]">Kelas Siswa</span>
-                <span className="font-bold">{selectedBillForDetail.student?.kelas}</span>
-              </div>
-              <div>
-                <span className="text-slate-400 block text-[10px]">Nama Wali</span>
-                <span className="font-bold">{selectedBillForDetail.student?.nama_orang_tua}</span>
-              </div>
-              <div>
-                <span className="text-slate-400 block text-[10px]">WhatsApp Wali</span>
-                <span className="font-mono">{selectedBillForDetail.student?.no_hp_ortu}</span>
-              </div>
-              <div>
-                <span className="text-slate-400 block text-[10px]">Total Biaya</span>
-                <span className="font-bold">{formatRupiah(selectedBillForDetail.fee?.amount)}</span>
-              </div>
-              <div>
-                <span className="text-slate-400 block text-[10px]">Sisa Tunggakan</span>
-                <span className="font-bold text-rose-600">
-                  {formatRupiah(selectedBillForDetail.amount_due)}
+            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-3 text-xs">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-700">
+                <span className="font-bold text-slate-800 dark:text-slate-200">
+                  Data Siswa & Kontak Wali:
                 </span>
+                {!isUser && (
+                  <button
+                    type="button"
+                    onClick={() => handleOpenEditContact(selectedBillForDetail.student)}
+                    className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 hover:underline"
+                  >
+                    <Edit3 className="w-3 h-3" />
+                    Ubah Nomor HP & Email Wali
+                  </button>
+                )}
               </div>
-              <div>
-                <span className="text-slate-400 block text-[10px]">Status</span>
-                <StatusBadge status={selectedBillForDetail.payment_status} size="sm" />
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                <div>
+                  <span className="text-slate-400 block text-[10px]">Kelas Siswa</span>
+                  <span className="font-bold">{selectedBillForDetail.student?.kelas}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px]">Nama Wali</span>
+                  <span className="font-bold">{selectedBillForDetail.student?.nama_orang_tua || '-'}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px]">No. WhatsApp Wali</span>
+                  <div className="flex items-center gap-1.5 font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                    <span>{selectedBillForDetail.student?.no_hp_ortu || '-'}</span>
+                    {selectedBillForDetail.student?.no_hp_ortu && (
+                      <a
+                        href={createWhatsAppUrl(
+                          selectedBillForDetail.student?.no_hp_ortu,
+                          notificationService.generateMessage(selectedBillForDetail, 'WhatsApp')
+                        )}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="p-1 rounded bg-emerald-100 dark:bg-emerald-950/60 hover:bg-emerald-200 text-emerald-700 dark:text-emerald-300"
+                        title="Buka Chat WhatsApp Langsung"
+                      >
+                        <Phone className="w-3 h-3" />
+                      </a>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px]">Email Wali</span>
+                  <div className="flex items-center gap-1.5 font-mono text-indigo-600 dark:text-indigo-400">
+                    <span className="truncate max-w-[130px]">{selectedBillForDetail.student?.email_ortu || '-'}</span>
+                    {selectedBillForDetail.student?.email_ortu && (
+                      <a
+                        href={createMailtoUrl(
+                          selectedBillForDetail.student?.email_ortu,
+                          `Tagihan SPP - ${selectedBillForDetail.fee?.fee_name}`,
+                          notificationService.generateMessage(selectedBillForDetail, 'Email')
+                        )}
+                        className="p-1 rounded bg-indigo-100 dark:bg-indigo-950/60 hover:bg-indigo-200 text-indigo-700 dark:text-indigo-300"
+                        title="Buka Aplikasi Email Langsung"
+                      >
+                        <Mail className="w-3 h-3" />
+                      </a>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px]">Total Biaya</span>
+                  <span className="font-bold">{formatRupiah(selectedBillForDetail.fee?.amount)}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px]">Sisa Tunggakan</span>
+                  <span className="font-bold text-rose-600">
+                    {formatRupiah(selectedBillForDetail.amount_due)}
+                  </span>
+                </div>
               </div>
+
+              {!isUser && selectedBillForDetail.amount_due > 0 && (
+                <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-200 dark:border-slate-700">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      const bill = selectedBillForDetail;
+                      setSelectedBillForDetail(null);
+                      handleOpenReminderModal(bill);
+                    }}
+                    className="text-indigo-600 border-indigo-200 dark:border-indigo-800 hover:bg-indigo-50 text-xs"
+                  >
+                    <Send className="w-3 h-3 mr-1" />
+                    Kirim Notifikasi Pengingat
+                  </Button>
+                </div>
+              )}
             </div>
 
             {/* Riwayat Pembayaran untuk Tagihan ini */}
@@ -845,56 +1078,278 @@ export default function Bills() {
         <Modal
           isOpen={true}
           onClose={() => setSelectedBillForReminder(null)}
-          title={`Kirim Pengingat Tunggakan`}
-          subtitle={`Wali: ${selectedBillForReminder.student?.nama_orang_tua} • Siswa: ${selectedBillForReminder.student?.nama}`}
+          title={`Kirim Pengingat Tagihan`}
+          subtitle={`Wali: ${selectedBillForReminder.student?.nama_orang_tua || '-'} • Siswa: ${selectedBillForReminder.student?.nama}`}
+          size="lg"
         >
           <div className="space-y-4">
-            <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-xs">
-              <p className="font-bold text-amber-900 dark:text-amber-200">
-                Sisa Tunggakan: {formatRupiah(selectedBillForReminder.amount_due)}
-              </p>
-              <p className="text-[11px] text-amber-700 dark:text-amber-300 mt-0.5">
-                Tagihan {selectedBillForReminder.fee?.fee_name} jatuh tempo pada {formatDate(selectedBillForReminder.fee?.due_date)}.
+            <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-xs flex justify-between items-center">
+              <div>
+                <p className="font-bold text-amber-900 dark:text-amber-200">
+                  Sisa Tunggakan: {formatRupiah(selectedBillForReminder.amount_due)}
+                </p>
+                <p className="text-[11px] text-amber-700 dark:text-amber-300 mt-0.5">
+                  Tagihan {selectedBillForReminder.fee?.fee_name} jatuh tempo pada {formatDate(selectedBillForReminder.fee?.due_date)}.
+                </p>
+              </div>
+              <span className="font-mono text-[11px] px-2 py-1 rounded bg-amber-200/60 dark:bg-amber-900 text-amber-900 dark:text-amber-200 font-bold">
+                {selectedBillForReminder.payment_status}
+              </span>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                Pilih Kanal Notifikasi:
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleReminderChannelChange('WhatsApp')}
+                  className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                    reminderChannel === 'WhatsApp'
+                      ? 'border-emerald-500 bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 shadow-xs'
+                      : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  <Phone className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>WhatsApp / HP</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleReminderChannelChange('Email')}
+                  className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                    reminderChannel === 'Email'
+                      ? 'border-indigo-500 bg-indigo-50 text-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-300 shadow-xs'
+                      : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  <Mail className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Email Resmi</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleReminderChannelChange('Both')}
+                  className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                    reminderChannel === 'Both'
+                      ? 'border-purple-500 bg-purple-50 text-purple-800 dark:bg-purple-950/40 dark:text-purple-300 shadow-xs'
+                      : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                  <span>Keduanya Sekaligus</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Input Nomor HP dan Email */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {(reminderChannel === 'WhatsApp' || reminderChannel === 'Both') && (
+                <div className={reminderChannel === 'WhatsApp' ? 'md:col-span-2' : ''}>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1">
+                    <Phone className="w-3.5 h-3.5 text-emerald-600" />
+                    Nomor WhatsApp / HP Wali:
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={reminderCustomPhone}
+                    onChange={(e) => setReminderCustomPhone(e.target.value)}
+                    placeholder="Contoh: 0812-3456-7890"
+                    className="w-full px-3 py-2 text-xs font-mono font-bold bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+              )}
+
+              {(reminderChannel === 'Email' || reminderChannel === 'Both') && (
+                <div className={reminderChannel === 'Email' ? 'md:col-span-2' : ''}>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1">
+                    <Mail className="w-3.5 h-3.5 text-indigo-600" />
+                    Alamat Email Wali:
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={reminderCustomEmail}
+                    onChange={(e) => setReminderCustomEmail(e.target.value)}
+                    placeholder="Contoh: wali.siswa@gmail.com"
+                    className="w-full px-3 py-2 text-xs font-medium bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Editor Pesan */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Isi Draf Pesan Pengingat:
+                </label>
+                <span className="text-[11px] text-slate-400">
+                  {reminderCustomMessage.length} karakter
+                </span>
+              </div>
+              <textarea
+                rows={5}
+                value={reminderCustomMessage}
+                onChange={(e) => setReminderCustomMessage(e.target.value)}
+                className="w-full p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-mono text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+
+            {/* Checkbox Simpan Kontak Permanen */}
+            <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
+              <label className="flex items-center gap-2 cursor-pointer select-none text-xs text-slate-700 dark:text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={reminderSaveContact}
+                  onChange={(e) => setReminderSaveContact(e.target.checked)}
+                  className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
+                />
+                <span className="font-medium">
+                  Perbarui nomor telepon & email ini ke profil database siswa secara permanen
+                </span>
+              </label>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="pt-2 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 border-t border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2 flex-wrap">
+                {(reminderChannel === 'WhatsApp' || reminderChannel === 'Both') && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleDirectWhatsApp}
+                      className="px-3 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 border border-emerald-300 dark:border-emerald-800 text-xs font-bold flex items-center justify-center gap-1.5 transition-all"
+                      title="Buka WhatsApp Web / Aplikasi langsung dengan nomor dan pesan ini"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5 text-emerald-600" />
+                      Buka di WhatsApp (wa.me)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDirectSms}
+                      className="px-2.5 py-1.5 rounded-xl bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 hover:bg-teal-100 border border-teal-300 dark:border-teal-800 text-xs font-bold flex items-center justify-center gap-1.5 transition-all"
+                      title="Buka SMS ponsel"
+                    >
+                      <MessageSquare className="w-3.5 h-3.5 text-teal-600" />
+                      Kirim SMS
+                    </button>
+                  </>
+                )}
+
+                {(reminderChannel === 'Email' || reminderChannel === 'Both') && (
+                  <button
+                    type="button"
+                    onClick={handleDirectEmail}
+                    className="px-3 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 border border-indigo-300 dark:border-indigo-800 text-xs font-bold flex items-center justify-center gap-1.5 transition-all"
+                    title="Buka aplikasi email langsung"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5 text-indigo-600" />
+                    Buka Aplikasi Email
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-2">
+                <Button variant="outline" size="sm" onClick={() => setSelectedBillForReminder(null)}>
+                  Batal
+                </Button>
+                <Button
+                  size="sm"
+                  loading={reminderSending}
+                  onClick={handleSendReminder}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white"
+                  icon={Send}
+                >
+                  Kirim & Catat ke Sistem
+                </Button>
+              </div>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: UBAH KONTAK ORANG TUA / WALI SISWA (NO. HP & EMAIL) */}
+      {/* ========================================================================= */}
+      {showEditContactModal && editingStudent && (
+        <Modal
+          isOpen={true}
+          onClose={() => setShowEditContactModal(false)}
+          title="Ubah Kontak Orang Tua Siswa"
+          subtitle={`Siswa: ${editingStudent.nama} • Kelas: ${editingStudent.kelas} (NIS: ${editingStudent.nis})`}
+          size="md"
+        >
+          <form onSubmit={handleSaveContact} className="space-y-4 text-xs">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                Nama Lengkap Orang Tua / Wali:
+              </label>
+              <input
+                type="text"
+                required
+                value={contactForm.nama_orang_tua}
+                onChange={(e) => setContactForm({ ...contactForm, nama_orang_tua: e.target.value })}
+                className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1">
+                <Phone className="w-3.5 h-3.5 text-emerald-600" />
+                Nomor WhatsApp / HP Orang Tua:
+              </label>
+              <input
+                type="text"
+                required
+                value={contactForm.no_hp_ortu}
+                onChange={(e) => setContactForm({ ...contactForm, no_hp_ortu: e.target.value })}
+                placeholder="Contoh: 0812-3456-7890"
+                className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-mono font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+              <p className="text-[10px] text-slate-400 mt-1">
+                * Nomor ini digunakan saat mengirimkan notifikasi pengingat via WhatsApp & SMS.
               </p>
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                Kanal Pengiriman
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1">
+                <Mail className="w-3.5 h-3.5 text-indigo-600" />
+                Alamat Email Orang Tua:
               </label>
-              <div className="flex gap-3">
-                {['WhatsApp', 'Email'].map((ch) => (
-                  <button
-                    key={ch}
-                    type="button"
-                    onClick={() => setReminderChannel(ch)}
-                    className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-all ${
-                      reminderChannel === ch
-                        ? 'bg-indigo-50 border-indigo-500 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300'
-                        : 'border-slate-200 dark:border-slate-700 text-slate-600'
-                    }`}
-                  >
-                    {ch}
-                  </button>
-                ))}
-              </div>
+              <input
+                type="email"
+                required
+                value={contactForm.email_ortu}
+                onChange={(e) => setContactForm({ ...contactForm, email_ortu: e.target.value })}
+                placeholder="Contoh: wali.siswa@gmail.com"
+                className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-medium text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+              <p className="text-[10px] text-slate-400 mt-1">
+                * Email ini digunakan untuk pengiriman tanda terima pembayaran dan tagihan resmi.
+              </p>
             </div>
 
-            <div className="pt-2 flex items-center justify-end gap-2">
-              <Button variant="outline" size="sm" onClick={() => setSelectedBillForReminder(null)}>
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowEditContactModal(false)}
+                disabled={savingContact}
+              >
                 Batal
               </Button>
               <Button
+                type="submit"
                 size="sm"
-                loading={reminderSending}
-                onClick={handleSendReminder}
+                disabled={savingContact}
                 className="bg-indigo-600 hover:bg-indigo-700 text-white"
-                icon={Send}
               >
-                Kirim Pengingat Sekarang
+                {savingContact ? 'Menyimpan...' : 'Simpan Perubahan Kontak'}
               </Button>
             </div>
-          </div>
+          </form>
         </Modal>
       )}
 

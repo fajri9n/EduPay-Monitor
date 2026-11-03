@@ -494,12 +494,12 @@ export const apiService = {
     return [...state.notificationLogs].sort((a, b) => new Date(b.waktu_kirim) - new Date(a.waktu_kirim));
   },
 
-  async sendNotification(billId, channel = 'WhatsApp', customMessage = null) {
+  async sendNotification(billId, channel = 'WhatsApp', customMessage = null, customRecipient = null) {
     if (USE_REMOTE_API) {
       const res = await fetch(`${API_BASE_URL}/notifications/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ billId, channel, customMessage }),
+        body: JSON.stringify({ billId, channel, customMessage, customRecipient }),
       });
       return res.json();
     }
@@ -510,10 +510,21 @@ export const apiService = {
     const student = state.students.find((s) => s.student_id === bill.student_id);
     const fee = state.feeStructures.find((f) => f.fee_id === bill.fee_id);
 
-    const recipient = channel === 'WhatsApp' ? student.no_hp_ortu : student.email_ortu;
+    const defaultRecipient = channel === 'WhatsApp' ? student?.no_hp_ortu : student?.email_ortu;
+    const recipient = customRecipient ? customRecipient.trim() : defaultRecipient;
+
+    // Perbarui juga data kontak siswa jika nomor/email diubah
+    if (student && customRecipient) {
+      if (channel === 'WhatsApp') {
+        student.no_hp_ortu = customRecipient.trim();
+      } else {
+        student.email_ortu = customRecipient.trim();
+      }
+    }
+
     const message =
       customMessage ||
-      `Yth. ${student.nama_orang_tua}, tagihan ${fee.fee_name} an. ${student.nama} memiliki sisa tunggakan Rp ${bill.amount_due.toLocaleString('id-ID')}. Jatuh tempo pada ${fee.due_date}.`;
+      `Yth. ${student?.nama_orang_tua || 'Orang Tua'}, tagihan ${fee?.fee_name || 'SPP'} an. ${student?.nama || 'Siswa'} memiliki sisa tunggakan Rp ${Number(bill.amount_due || 0).toLocaleString('id-ID')}. Jatuh tempo pada ${fee?.due_date || '-'}.`;
 
     const newLog = {
       notification_id: Math.max(...state.notificationLogs.map((l) => l.notification_id), 0) + 1,
@@ -630,6 +641,156 @@ export const apiService = {
   async getStudents() {
     await simulateDelay(50);
     return [...state.students];
+  },
+
+  /**
+   * Mengubah informasi kontak orang tua / wali siswa (No. HP/WA, Email, Nama Wali)
+   * @param {number|string} studentId
+   * @param {{ nama_orang_tua?: string, no_hp_ortu?: string, email_ortu?: string }} contactData
+   */
+  async updateStudentContact(studentId, { nama_orang_tua, no_hp_ortu, email_ortu }) {
+    if (USE_REMOTE_API) {
+      const res = await fetch(`${API_BASE_URL}/students/${studentId}/contact`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nama_orang_tua, no_hp_ortu, email_ortu }),
+      });
+      return res.json();
+    }
+    await simulateDelay(60);
+    const student = state.students.find((s) => s.student_id === Number(studentId));
+    if (!student) throw new Error('Data siswa tidak ditemukan.');
+
+    if (nama_orang_tua !== undefined && nama_orang_tua !== null) {
+      student.nama_orang_tua = String(nama_orang_tua).trim();
+    }
+    if (no_hp_ortu !== undefined && no_hp_ortu !== null) {
+      student.no_hp_ortu = String(no_hp_ortu).trim();
+    }
+    if (email_ortu !== undefined && email_ortu !== null) {
+      student.email_ortu = String(email_ortu).trim();
+    }
+
+    return { ...student };
+  },
+
+  /**
+   * Menambahkan data siswa baru ke dalam sistem
+   * @param {Object} payload
+   */
+  async createStudent(payload) {
+    if (USE_REMOTE_API) {
+      const res = await fetch(`${API_BASE_URL}/students`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return res.json();
+    }
+    await simulateDelay(80);
+    const newId = Math.max(...state.students.map((s) => s.student_id), 0) + 1;
+    const newNis = payload.nis && payload.nis.trim()
+      ? payload.nis.trim()
+      : `2026${String(newId).padStart(4, '0')}`;
+
+    const newStudent = {
+      student_id: newId,
+      nis: newNis,
+      nama: payload.nama.trim(),
+      kelas: payload.kelas || 'X-A',
+      nama_orang_tua: payload.nama_orang_tua ? payload.nama_orang_tua.trim() : 'Orang Tua / Wali',
+      email_ortu: payload.email_ortu ? payload.email_ortu.trim() : `ortu.${newNis}@example.com`,
+      no_hp_ortu: payload.no_hp_ortu ? payload.no_hp_ortu.trim() : '0812' + Math.floor(10000000 + Math.random() * 90000000),
+      status_aktif: payload.status_aktif !== undefined ? payload.status_aktif : true,
+    };
+
+    state.students.push(newStudent);
+
+    // Jika dipilih opsi buatkan tagihan otomatis untuk siswa baru
+    if (payload.autoCreateBills && state.feeStructures.length > 0) {
+      const defaultFee = state.feeStructures[0];
+      const newBillId = Math.max(...state.bills.map((b) => b.bill_id), 0) + 1;
+      state.bills.push({
+        bill_id: newBillId,
+        student_id: newId,
+        fee_id: defaultFee.fee_id,
+        amount_due: defaultFee.amount,
+        payment_status: 'Unpaid',
+        created_at: '2026-11-03',
+      });
+    }
+
+    return newStudent;
+  },
+
+  /**
+   * Mengubah data lengkap siswa
+   * @param {number|string} studentId
+   * @param {Object} payload
+   */
+  async updateStudent(studentId, payload) {
+    if (USE_REMOTE_API) {
+      const res = await fetch(`${API_BASE_URL}/students/${studentId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return res.json();
+    }
+    await simulateDelay(60);
+    const student = state.students.find((s) => s.student_id === Number(studentId));
+    if (!student) throw new Error('Data siswa tidak ditemukan.');
+
+    if (payload.nama !== undefined) student.nama = payload.nama.trim();
+    if (payload.nis !== undefined) student.nis = payload.nis.trim();
+    if (payload.kelas !== undefined) student.kelas = payload.kelas.trim();
+    if (payload.nama_orang_tua !== undefined) student.nama_orang_tua = payload.nama_orang_tua.trim();
+    if (payload.no_hp_ortu !== undefined) student.no_hp_ortu = payload.no_hp_ortu.trim();
+    if (payload.email_ortu !== undefined) student.email_ortu = payload.email_ortu.trim();
+    if (payload.status_aktif !== undefined) student.status_aktif = Boolean(payload.status_aktif);
+
+    return { ...student };
+  },
+
+  /**
+   * Menghapus data siswa beserta tagihannya
+   * @param {number|string} studentId
+   */
+  async deleteStudent(studentId) {
+    if (USE_REMOTE_API) {
+      const res = await fetch(`${API_BASE_URL}/students/${studentId}`, {
+        method: 'DELETE',
+      });
+      return res.json();
+    }
+    await simulateDelay(60);
+    const id = Number(studentId);
+    const idx = state.students.findIndex((s) => s.student_id === id);
+    if (idx === -1) throw new Error('Data siswa tidak ditemukan.');
+    const deleted = state.students.splice(idx, 1)[0];
+
+    // Bersihkan tagihan siswa terkait
+    state.bills = state.bills.filter((b) => b.student_id !== id);
+
+    return { success: true, deletedStudent: deleted };
+  },
+
+  /**
+   * Mengubah status aktif / non-aktif siswa
+   * @param {number|string} studentId
+   */
+  async toggleStudentStatus(studentId) {
+    if (USE_REMOTE_API) {
+      const res = await fetch(`${API_BASE_URL}/students/${studentId}/toggle-status`, {
+        method: 'PATCH',
+      });
+      return res.json();
+    }
+    await simulateDelay(40);
+    const student = state.students.find((s) => s.student_id === Number(studentId));
+    if (!student) throw new Error('Data siswa tidak ditemukan.');
+    student.status_aktif = !student.status_aktif;
+    return { ...student };
   },
 
   async getFeeStructures() {

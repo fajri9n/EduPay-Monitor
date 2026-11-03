@@ -88,10 +88,11 @@ export function DataProvider({ children }) {
   };
 
   // Actions Realtime Notifikasi & Pengingat
-  const sendNotification = async (billId, channel, customMessage) => {
-    const res = await notificationService.sendSingle(billId, channel, customMessage);
+  const sendNotification = async (billId, channel, customMessage, customRecipient) => {
+    const res = await notificationService.sendSingle(billId, channel, customMessage, customRecipient);
     const updatedLogs = await apiService.getNotificationLogs();
     setNotificationLogs(updatedLogs);
+    await fetchData(); // Sinkronkan data siswa jika ada nomor HP baru yang diperbarui
     return res;
   };
 
@@ -100,6 +101,38 @@ export function DataProvider({ children }) {
     const updatedLogs = await apiService.getNotificationLogs();
     setNotificationLogs(updatedLogs);
     return res;
+  };
+
+  // Ubah Kontak Siswa & Orang Tua Real-time
+  const updateStudentContact = async (studentId, contactData) => {
+    const updated = await apiService.updateStudentContact(studentId, contactData);
+    await fetchData();
+    return updated;
+  };
+
+  // Actions Realtime Manajemen Siswa (Student Management)
+  const createStudent = async (payload) => {
+    const newStudent = await apiService.createStudent(payload);
+    await fetchData();
+    return newStudent;
+  };
+
+  const updateStudent = async (studentId, payload) => {
+    const updated = await apiService.updateStudent(studentId, payload);
+    await fetchData();
+    return updated;
+  };
+
+  const deleteStudent = async (studentId) => {
+    const res = await apiService.deleteStudent(studentId);
+    await fetchData();
+    return res;
+  };
+
+  const toggleStudentStatus = async (studentId) => {
+    const updated = await apiService.toggleStudentStatus(studentId);
+    await fetchData();
+    return updated;
   };
 
   // Actions Realtime Anggaran Operasional
@@ -182,6 +215,11 @@ export function DataProvider({ children }) {
         recordTransaction,
         sendNotification,
         sendBulkNotifications,
+        updateStudentContact,
+        createStudent,
+        updateStudent,
+        deleteStudent,
+        toggleStudentStatus,
         addExpenditure,
         createUser,
         updateUser,

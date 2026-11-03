@@ -5,6 +5,6 @@ export default defineConfig({
   plugins: [react()],
   server: {
     host: '0.0.0.0',
-    allowedHosts: ['etc-stuart-expense-patches.trycloudflare.com'],
+    allowedHosts: ['.trycloudflare.com'],
   },
 })

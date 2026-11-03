@@ -53,6 +53,12 @@ export default function Sidebar({
       allowedRoles: ['super_admin', 'admin', 'user'],
     },
     {
+      name: 'Kelola Siswa',
+      path: '/students',
+      icon: GraduationCap,
+      allowedRoles: ['super_admin', 'admin'],
+    },
+    {
       name: 'Transaksi & Verifikasi',
       path: '/transactions',
       icon: ArrowLeftRight,

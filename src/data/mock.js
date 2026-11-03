@@ -752,8 +752,8 @@ export const mockStudents = [
     "nama": "Erna Wibowo",
     "kelas": "XI-IPS",
     "nama_orang_tua": "Bpk. Hafiz Wibowo",
-    "email_ortu": "ortu.20260074@example.com",
-    "no_hp_ortu": "081228313509",
+    "email_ortu": "syahnurfajri0@gmail.com",
+    "no_hp_ortu": "085159989537",
     "status_aktif": true
   },
   {
