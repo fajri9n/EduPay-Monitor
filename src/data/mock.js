@@ -9635,10 +9635,40 @@ export const mockNotificationLogs = [
   }
 ];
 
+export const mockSystemSettings = {
+  institutionName: "SMA Nusantara Mandiri",
+  institutionMotto: "Unggul, Berkarakter & Berdaya Saing Global",
+  academicYear: "2026/2027",
+  systemDate: "2026-11-03",
+  address: "Jl. Pendidikan No. 45, Kebayoran Baru, Jakarta Selatan",
+  phone: "(021) 7890-1234",
+  whatsappContact: "0812-3456-7890",
+  email: "info@edupay.sch.id",
+  bankAccounts: [
+    { bank: "Bank Mandiri", accountNo: "123-00-9876543-1", holder: "Yayasan Nusantara Mandiri" },
+    { bank: "BCA", accountNo: "882-019-2831", holder: "Yayasan Nusantara Mandiri" },
+    { bank: "BRI Virtual Account", accountNo: "7001-2026-0001", holder: "EduPay Virtual Account" }
+  ],
+  overdueGraceDays: 3,
+  maintenanceMode: false,
+};
+
 export const mockUsers = [
   {
     "user_id": 1,
+    "username": "superadmin",
+    "password": "password123",
+    "role": "super_admin",
+    "role_name": "Super Administrator (Akses Penuh)",
+    "nama_lengkap": "Prof. Dr. Ir. H. Raden Mas Bagus, M.Sc.",
+    "email": "superadmin@edupay.sch.id",
+    "status_aktif": true,
+    "avatar": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80"
+  },
+  {
+    "user_id": 2,
     "username": "admin",
+    "password": "password123",
     "role": "admin",
     "role_name": "Administrator",
     "nama_lengkap": "Suryadi Wibisono, S.Kom.",
@@ -9647,9 +9677,22 @@ export const mockUsers = [
     "avatar": "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=120&auto=format&fit=crop&q=80"
   },
   {
-    "user_id": 2,
+    "user_id": 3,
+    "username": "user",
+    "password": "password123",
+    "role": "user",
+    "role_name": "User / Siswa",
+    "nama_lengkap": "Budi Pratama (Siswa Kelas X-A)",
+    "email": "budi.pratama@siswa.edupay.sch.id",
+    "student_id": 1,
+    "status_aktif": true,
+    "avatar": "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=120&auto=format&fit=crop&q=80"
+  },
+  {
+    "user_id": 4,
     "username": "bendahara",
-    "role": "bendahara",
+    "password": "password123",
+    "role": "admin",
     "role_name": "Bendahara Sekolah",
     "nama_lengkap": "Hj. Siti Aminah, S.E.",
     "email": "bendahara@edupay.sch.id",
@@ -9657,9 +9700,10 @@ export const mockUsers = [
     "avatar": "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=120&auto=format&fit=crop&q=80"
   },
   {
-    "user_id": 3,
+    "user_id": 5,
     "username": "kepsek",
-    "role": "kepala_sekolah",
+    "password": "password123",
+    "role": "admin",
     "role_name": "Kepala Sekolah",
     "nama_lengkap": "Drs. H. Mulyadi, M.Pd.",
     "email": "kepsek@edupay.sch.id",
@@ -9667,9 +9711,10 @@ export const mockUsers = [
     "avatar": "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=120&auto=format&fit=crop&q=80"
   },
   {
-    "user_id": 4,
+    "user_id": 6,
     "username": "ortu",
-    "role": "orang_tua",
+    "password": "password123",
+    "role": "user",
     "role_name": "Orang Tua Siswa",
     "nama_lengkap": "Bambang Pratama (Wali Budi Pratama - X-A)",
     "email": "ortu.20260001@example.com",

@@ -9,10 +9,12 @@ import {
   PieChart,
   BellRing,
   Users,
+  Sliders,
   GraduationCap,
   ChevronLeft,
   ChevronRight,
-  X
+  X,
+  ShieldAlert
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useData } from '../../context/DataContext';
@@ -23,8 +25,8 @@ export default function Sidebar({
   mobileOpen,
   setMobileOpen
 }) {
-  const { currentUser, isRole } = useAuth();
-  const { overdueCount } = useData();
+  const { currentUser, isSuperAdmin } = useAuth();
+  const { overdueCount, systemSettings } = useData();
 
   // Definisi navigasi dengan batasan otorisasi peran
   const navigationItems = [
@@ -32,7 +34,7 @@ export default function Sidebar({
       name: 'Dashboard Utama',
       path: '/',
       icon: LayoutDashboard,
-      allowedRoles: ['admin', 'bendahara', 'kepala_sekolah', 'orang_tua'],
+      allowedRoles: ['super_admin', 'admin', 'user'],
     },
     {
       name: 'Overdue Tracking',
@@ -40,48 +42,56 @@ export default function Sidebar({
       icon: AlertTriangle,
       badge: overdueCount > 0 ? overdueCount : null,
       badgeColor: 'bg-rose-500 text-white',
-      allowedRoles: ['admin', 'bendahara', 'kepala_sekolah'],
+      allowedRoles: ['super_admin', 'admin'],
     },
     {
       name: 'Tagihan Siswa',
       path: '/bills',
       icon: Receipt,
-      allowedRoles: ['admin', 'bendahara', 'kepala_sekolah', 'orang_tua'],
+      allowedRoles: ['super_admin', 'admin', 'user'],
     },
     {
       name: 'Transaksi & Verifikasi',
       path: '/transactions',
       icon: ArrowLeftRight,
-      allowedRoles: ['admin', 'bendahara', 'kepala_sekolah'],
+      allowedRoles: ['super_admin', 'admin'],
     },
     {
       name: 'Laporan Kas',
       path: '/cash-reports',
       icon: TrendingUp,
-      allowedRoles: ['admin', 'bendahara', 'kepala_sekolah'],
+      allowedRoles: ['super_admin', 'admin'],
     },
     {
       name: 'Monitoring Anggaran',
       path: '/budget',
       icon: PieChart,
-      allowedRoles: ['admin', 'bendahara', 'kepala_sekolah'],
+      allowedRoles: ['super_admin', 'admin'],
     },
     {
       name: 'Log Notifikasi',
       path: '/notifications',
       icon: BellRing,
-      allowedRoles: ['admin', 'bendahara', 'kepala_sekolah'],
+      allowedRoles: ['super_admin', 'admin'],
     },
     {
       name: 'Manajemen User',
       path: '/users',
       icon: Users,
-      allowedRoles: ['admin'],
+      allowedRoles: ['super_admin', 'admin'],
+    },
+    {
+      name: 'Pengaturan Website',
+      path: '/settings',
+      icon: Sliders,
+      badge: 'Super',
+      badgeColor: 'bg-purple-600 text-white',
+      allowedRoles: ['super_admin'],
     },
   ];
 
   const filteredItems = navigationItems.filter((item) =>
-    item.allowedRoles.includes(currentUser?.role || 'bendahara')
+    isSuperAdmin || item.allowedRoles.includes(currentUser?.role || 'admin')
   );
 
   return (
@@ -111,7 +121,9 @@ export default function Sidebar({
                 <span className="font-bold text-base tracking-tight text-white truncate">
                   EduPay <span className="text-teal-400 font-extrabold">Monitor</span>
                 </span>
-                <span className="text-[10px] text-slate-400 truncate">Sistem Keuangan Kampus/Sekolah</span>
+                <span className="text-[10px] text-slate-400 truncate">
+                  {systemSettings?.institutionName || 'SMA Nusantara Mandiri'}
+                </span>
               </div>
             )}
           </div>
@@ -124,6 +136,17 @@ export default function Sidebar({
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {/* Super Admin Status Banner in Sidebar */}
+        {isSuperAdmin && !isCollapsed && (
+          <div className="mx-3 mt-3 p-2.5 rounded-xl bg-purple-950/60 border border-purple-800/50 flex items-center gap-2">
+            <ShieldAlert className="w-4 h-4 text-purple-400 shrink-0" />
+            <div className="text-[11px] leading-tight text-purple-200">
+              <span className="font-bold">Super Admin</span>
+              <p className="text-[10px] opacity-75">Kontrol Penuh Website</p>
+            </div>
+          </div>
+        )}
 
         {/* Navigation Links */}
         <nav className="flex-1 px-3 py-4 space-y-1.5 overflow-y-auto">
@@ -145,7 +168,7 @@ export default function Sidebar({
                 <Icon className={`w-5 h-5 shrink-0 transition-transform group-hover:scale-105`} />
                 {!isCollapsed && <span className="truncate flex-1">{item.name}</span>}
 
-                {/* Badge (Misal Overdue count) */}
+                {/* Badge (Misal Overdue count atau Super) */}
                 {item.badge && !isCollapsed && (
                   <span
                     className={`ml-auto px-2 py-0.5 rounded-full text-xs font-bold shrink-0 ${item.badgeColor}`}
@@ -170,7 +193,7 @@ export default function Sidebar({
         <div className="p-3 border-t border-slate-800/80 hidden lg:flex items-center justify-between">
           {!isCollapsed && (
             <div className="text-[11px] text-slate-500 font-mono">
-              v1.0 • TA 2026/2027
+              TA {systemSettings?.academicYear || '2026/2027'}
             </div>
           )}
           <button
@@ -187,4 +210,3 @@ export default function Sidebar({
     </>
   );
 }
-

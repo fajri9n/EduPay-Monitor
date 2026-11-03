@@ -6,6 +6,7 @@ import { DataProvider } from './context/DataContext';
 
 import AppLayout from './components/layout/AppLayout';
 import Login from './pages/Login';
+import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import Overdue from './pages/Overdue';
 import Bills from './pages/Bills';
@@ -14,13 +15,19 @@ import CashReports from './pages/CashReports';
 import Budget from './pages/Budget';
 import Notifications from './pages/Notifications';
 import Users from './pages/Users';
+import SystemSettings from './pages/SystemSettings';
 
-// Route Guard
+// Route Guard dengan Privilege Super Admin
 function ProtectedRoute({ children, allowedRoles }) {
   const { isAuthenticated, currentUser } = useAuth();
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
+  }
+
+  // Super Admin memiliki akses mutlak ke SEMUA halaman
+  if (currentUser?.role === 'super_admin') {
+    return children;
   }
 
   if (allowedRoles && !allowedRoles.includes(currentUser?.role)) {
@@ -37,8 +44,9 @@ export default function App() {
         <DataProvider>
           <BrowserRouter>
             <Routes>
-              {/* Public Route */}
+              {/* Public Routes: Login & Register */}
               <Route path="/login" element={<Login />} />
+              <Route path="/register" element={<Register />} />
 
               {/* Protected App Routes */}
               <Route
@@ -53,7 +61,7 @@ export default function App() {
                 <Route
                   path="overdue"
                   element={
-                    <ProtectedRoute allowedRoles={['admin', 'bendahara', 'kepala_sekolah']}>
+                    <ProtectedRoute allowedRoles={['admin', 'super_admin']}>
                       <Overdue />
                     </ProtectedRoute>
                   }
@@ -62,7 +70,7 @@ export default function App() {
                 <Route
                   path="transactions"
                   element={
-                    <ProtectedRoute allowedRoles={['admin', 'bendahara', 'kepala_sekolah']}>
+                    <ProtectedRoute allowedRoles={['admin', 'super_admin']}>
                       <Transactions />
                     </ProtectedRoute>
                   }
@@ -70,7 +78,7 @@ export default function App() {
                 <Route
                   path="cash-reports"
                   element={
-                    <ProtectedRoute allowedRoles={['admin', 'bendahara', 'kepala_sekolah']}>
+                    <ProtectedRoute allowedRoles={['admin', 'super_admin']}>
                       <CashReports />
                     </ProtectedRoute>
                   }
@@ -78,7 +86,7 @@ export default function App() {
                 <Route
                   path="budget"
                   element={
-                    <ProtectedRoute allowedRoles={['admin', 'bendahara', 'kepala_sekolah']}>
+                    <ProtectedRoute allowedRoles={['admin', 'super_admin']}>
                       <Budget />
                     </ProtectedRoute>
                   }
@@ -86,7 +94,7 @@ export default function App() {
                 <Route
                   path="notifications"
                   element={
-                    <ProtectedRoute allowedRoles={['admin', 'bendahara', 'kepala_sekolah']}>
+                    <ProtectedRoute allowedRoles={['admin', 'super_admin']}>
                       <Notifications />
                     </ProtectedRoute>
                   }
@@ -94,8 +102,16 @@ export default function App() {
                 <Route
                   path="users"
                   element={
-                    <ProtectedRoute allowedRoles={['admin']}>
+                    <ProtectedRoute allowedRoles={['admin', 'super_admin']}>
                       <Users />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="settings"
+                  element={
+                    <ProtectedRoute allowedRoles={['super_admin']}>
+                      <SystemSettings />
                     </ProtectedRoute>
                   }
                 />
@@ -110,4 +126,3 @@ export default function App() {
     </ThemeProvider>
   );
 }
-

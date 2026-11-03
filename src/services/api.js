@@ -16,6 +16,7 @@ import {
   mockBudgetExpenditures,
   mockNotificationLogs,
   mockUsers,
+  mockSystemSettings,
   SYSTEM_DATE,
 } from '../data/mock';
 
@@ -36,6 +37,7 @@ let state = {
   budgetExpenditures: JSON.parse(JSON.stringify(mockBudgetExpenditures)),
   notificationLogs: JSON.parse(JSON.stringify(mockNotificationLogs)),
   users: JSON.parse(JSON.stringify(mockUsers)),
+  systemSettings: JSON.parse(JSON.stringify(mockSystemSettings)),
 };
 
 /**
@@ -78,7 +80,7 @@ function recalculateBillStatus(billId) {
 
 export const apiService = {
   // ---------------------------------------------------------------------------
-  // AUTH
+  // AUTH (LOGIN & REGISTER)
   // ---------------------------------------------------------------------------
   async login(username, password) {
     if (USE_REMOTE_API) {
@@ -95,6 +97,9 @@ export const apiService = {
     if (!user) {
       throw new Error('Username atau kata sandi tidak ditemukan.');
     }
+    if (user.password && password && user.password !== password) {
+      throw new Error('Kata sandi salah.');
+    }
     if (!user.status_aktif) {
       throw new Error('Akun Anda telah dinonaktifkan. Silakan hubungi admin.');
     }
@@ -102,6 +107,65 @@ export const apiService = {
       success: true,
       token: 'mock-jwt-token-' + user.user_id,
       user,
+    };
+  },
+
+  async register(payload) {
+    if (USE_REMOTE_API) {
+      const res = await fetch(`${API_BASE_URL}/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return res.json();
+    }
+
+    await simulateDelay();
+
+    // Validasi duplikasi username
+    const existsUsername = state.users.find(
+      (u) => u.username.toLowerCase() === payload.username.trim().toLowerCase()
+    );
+    if (existsUsername) {
+      throw new Error(`Username "${payload.username}" sudah digunakan.`);
+    }
+
+    // Validasi duplikasi email
+    const existsEmail = state.users.find(
+      (u) => u.email.toLowerCase() === payload.email.trim().toLowerCase()
+    );
+    if (existsEmail) {
+      throw new Error(`Email "${payload.email}" sudah terdaftar.`);
+    }
+
+    const newId = Math.max(...state.users.map((u) => u.user_id), 0) + 1;
+    const roleKey = payload.role || 'user';
+    const roleLabels = {
+      super_admin: 'Super Administrator (Akses Penuh)',
+      admin: 'Administrator',
+      user: 'User / Siswa',
+    };
+
+    const newUser = {
+      user_id: newId,
+      username: payload.username.trim(),
+      password: payload.password,
+      role: roleKey,
+      role_name: roleLabels[roleKey] || 'User',
+      nama_lengkap: payload.nama_lengkap.trim(),
+      email: payload.email.trim(),
+      phone: payload.phone || '0812' + Math.floor(10000000 + Math.random() * 90000000),
+      student_id: roleKey === 'user' ? 1 : null,
+      status_aktif: true,
+      avatar: `https://images.unsplash.com/photo-${1530000000000 + (newId * 100000)}?w=120&auto=format&fit=crop&q=80`,
+    };
+
+    state.users.push(newUser);
+
+    return {
+      success: true,
+      user: newUser,
+      message: 'Registrasi berhasil. Akun Anda telah siap digunakan.',
     };
   },
 
@@ -490,11 +554,17 @@ export const apiService = {
   async createUser(payload) {
     await simulateDelay();
     const newId = Math.max(...state.users.map((u) => u.user_id), 0) + 1;
+    const roleLabels = {
+      super_admin: 'Super Administrator (Akses Penuh)',
+      admin: 'Administrator',
+      user: 'User / Siswa',
+    };
     const newUser = {
       user_id: newId,
       username: payload.username,
-      role: payload.role,
-      role_name: payload.role_name || payload.role,
+      password: payload.password || 'password123',
+      role: payload.role || 'user',
+      role_name: roleLabels[payload.role] || payload.role_name || payload.role,
       nama_lengkap: payload.nama_lengkap,
       email: payload.email,
       status_aktif: true,
@@ -502,6 +572,49 @@ export const apiService = {
     };
     state.users.push(newUser);
     return newUser;
+  },
+
+  async updateUserRole(userId, newRole) {
+    await simulateDelay();
+    const idx = state.users.findIndex((u) => u.user_id === userId);
+    if (idx !== -1) {
+      const roleLabels = {
+        super_admin: 'Super Administrator (Akses Penuh)',
+        admin: 'Administrator',
+        user: 'User / Siswa',
+      };
+      state.users[idx].role = newRole;
+      state.users[idx].role_name = roleLabels[newRole] || newRole;
+      return state.users[idx];
+    }
+    throw new Error('User tidak ditemukan.');
+  },
+
+  async deleteUser(userId) {
+    await simulateDelay();
+    const idx = state.users.findIndex((u) => u.user_id === userId);
+    if (idx !== -1) {
+      const deleted = state.users.splice(idx, 1);
+      return deleted[0];
+    }
+    throw new Error('User tidak ditemukan.');
+  },
+
+  // ---------------------------------------------------------------------------
+  // KONTROL TOTAL WEBSITE / SETTINGS (KHUSUS SUPER ADMIN)
+  // ---------------------------------------------------------------------------
+  async getSystemSettings() {
+    await simulateDelay(60);
+    return { ...state.systemSettings };
+  },
+
+  async updateSystemSettings(newSettings) {
+    await simulateDelay();
+    state.systemSettings = {
+      ...state.systemSettings,
+      ...newSettings,
+    };
+    return { ...state.systemSettings };
   },
 };
 

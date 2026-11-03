@@ -11,6 +11,7 @@ export function DataProvider({ children }) {
   const [budgetData, setBudgetData] = useState({ allocations: [], expenditures: [] });
   const [notificationLogs, setNotificationLogs] = useState([]);
   const [dashboardSummary, setDashboardSummary] = useState(null);
+  const [systemSettings, setSystemSettings] = useState(null);
 
   // Filter global dashboard
   const [filterClass, setFilterClass] = useState('all');
@@ -20,12 +21,13 @@ export function DataProvider({ children }) {
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
-      const [billsData, txData, bgtData, notifData, summaryData] = await Promise.all([
+      const [billsData, txData, bgtData, notifData, summaryData, settingsData] = await Promise.all([
         apiService.getBills(),
         apiService.getTransactions(),
         apiService.getBudgetData(),
         apiService.getNotificationLogs(),
         apiService.getDashboardSummary(filterClass, filterPeriod),
+        apiService.getSystemSettings(),
       ]);
 
       setBills(billsData);
@@ -33,6 +35,7 @@ export function DataProvider({ children }) {
       setBudgetData(bgtData);
       setNotificationLogs(notifData);
       setDashboardSummary(summaryData);
+      setSystemSettings(settingsData);
     } catch (err) {
       console.error('Gagal memuat data sistem:', err);
     } finally {
@@ -82,6 +85,13 @@ export function DataProvider({ children }) {
     return res;
   };
 
+  // Khusus Super Admin: Mengubah seluruh konfigurasi website / institusi
+  const updateSystemSettings = async (newSettings) => {
+    const updated = await apiService.updateSystemSettings(newSettings);
+    setSystemSettings(updated);
+    return updated;
+  };
+
   // Hitung jumlah overdue real-time untuk badge sidebar & topbar
   const overdueCount = bills.filter((b) => b.payment_status === 'Overdue' && b.amount_due > 0).length;
 
@@ -94,6 +104,8 @@ export function DataProvider({ children }) {
         budgetData,
         notificationLogs,
         dashboardSummary,
+        systemSettings,
+        updateSystemSettings,
         filterClass,
         setFilterClass,
         filterPeriod,
@@ -120,4 +132,3 @@ export function useData() {
   }
   return context;
 }
-
