@@ -13,7 +13,8 @@ import {
   Clock,
   UserCheck,
   Sliders,
-  User
+  User,
+  CheckCircle2,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -21,9 +22,9 @@ import { useData } from '../../context/DataContext';
 import { Link, useNavigate } from 'react-router-dom';
 
 export default function Topbar({ setMobileOpen }) {
-  const { currentUser, switchDemoRole, logout, isSuperAdmin } = useAuth();
+  const { currentUser, switchDemoRole, logout, isSuperAdmin, isAdmin, isUser } = useAuth();
   const { isDark, toggleTheme } = useTheme();
-  const { overdueCount, transactions, systemSettings } = useData();
+  const { overdueCount, transactions, bills, systemSettings } = useData();
   const navigate = useNavigate();
 
   const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
@@ -51,7 +52,30 @@ export default function Topbar({ setMobileOpen }) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const pendingCount = transactions.filter((t) => t.verification_status === 'Pending').length;
+  // Notifikasi khusus admin & super admin
+  const pendingCount = (transactions || []).filter((t) => t.verification_status === 'Pending').length;
+
+  // Notifikasi khusus user (siswa / orang tua)
+  const studentId = currentUser?.student_id || 1;
+  const userBills = isUser ? (bills || []).filter((b) => b.student_id === studentId) : [];
+  const userOverdueBills = userBills.filter(
+    (b) => b.payment_status === 'Overdue' && b.amount_due > 0
+  );
+  const userPendingTransactions = (transactions || []).filter(
+    (t) =>
+      t.verification_status === 'Pending' &&
+      (userBills.some((b) => b.bill_id === t.bill_id) || t.student_id === studentId)
+  );
+
+  const userOverdueCount = userOverdueBills.length;
+  const userPendingCount = userPendingTransactions.length;
+
+  // Indikator aktif notifikasi:
+  // Admin & Super Admin: berdasarkan overdue global & transaksi pending verifikasi kasir
+  // User: hanya berdasarkan tagihan overdue pribadi & transaksi pending milik siswa tersebut
+  const hasNotifications = isAdmin
+    ? overdueCount > 0 || pendingCount > 0
+    : userOverdueCount > 0 || userPendingCount > 0;
 
   const handleRoleChange = (newRole) => {
     switchDemoRole(newRole);
@@ -182,7 +206,7 @@ export default function Topbar({ setMobileOpen }) {
               aria-label="Pusat Notifikasi"
             >
               <Bell className="w-5 h-5" />
-              {overdueCount > 0 && (
+              {hasNotifications && (
                 <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-rose-500 rounded-full ring-2 ring-white dark:ring-slate-900 animate-pulse" />
               )}
             </button>
@@ -191,54 +215,114 @@ export default function Topbar({ setMobileOpen }) {
               <div className="absolute right-0 mt-2 w-80 bg-white dark:bg-slate-900 rounded-xl shadow-xl border border-slate-200 dark:border-slate-800 p-2 z-50">
                 <div className="p-2 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
                   <span className="font-semibold text-xs text-slate-900 dark:text-slate-100">
-                    Notifikasi Sistem
+                    {isAdmin ? 'Notifikasi Sistem' : 'Notifikasi Saya'}
                   </span>
                   <span className="text-[10px] bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full text-slate-500">
                     Hari ini: 03 Nov 2026
                   </span>
                 </div>
 
-                <div className="py-2 space-y-1.5">
-                  {overdueCount > 0 && (
-                    <Link
-                      to="/overdue"
-                      onClick={() => setNotifDropdownOpen(false)}
-                      className="flex items-start gap-3 p-2.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors"
-                    >
-                      <div className="p-1.5 rounded-lg bg-rose-100 dark:bg-rose-900/40 text-rose-600 dark:text-rose-400 shrink-0">
-                        <AlertTriangle className="w-4 h-4" />
-                      </div>
-                      <div className="text-xs">
-                        <p className="font-semibold text-rose-900 dark:text-rose-300">
-                          {overdueCount} Tagihan Jatuh Tempo (Overdue)
-                        </p>
-                        <p className="text-slate-500 dark:text-slate-400 text-[11px] mt-0.5">
-                          Memerlukan pengiriman pengingat ke wali siswa.
-                        </p>
-                      </div>
-                    </Link>
-                  )}
+                {isAdmin ? (
+                  /* Khusus Super Admin & Admin: Notifikasi operasional sekolah (overdue & pending verifikasi kasir) */
+                  <div className="py-2 space-y-1.5">
+                    {overdueCount > 0 && (
+                      <Link
+                        to="/overdue"
+                        onClick={() => setNotifDropdownOpen(false)}
+                        className="flex items-start gap-3 p-2.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors"
+                      >
+                        <div className="p-1.5 rounded-lg bg-rose-100 dark:bg-rose-900/40 text-rose-600 dark:text-rose-400 shrink-0">
+                          <AlertTriangle className="w-4 h-4" />
+                        </div>
+                        <div className="text-xs">
+                          <p className="font-semibold text-rose-900 dark:text-rose-300">
+                            {overdueCount} Tagihan Jatuh Tempo (Overdue)
+                          </p>
+                          <p className="text-slate-500 dark:text-slate-400 text-[11px] mt-0.5">
+                            Memerlukan pengiriman pengingat ke wali siswa.
+                          </p>
+                        </div>
+                      </Link>
+                    )}
 
-                  {pendingCount > 0 && (
-                    <Link
-                      to="/transactions"
-                      onClick={() => setNotifDropdownOpen(false)}
-                      className="flex items-start gap-3 p-2.5 rounded-lg hover:bg-amber-50 dark:hover:bg-amber-950/30 transition-colors"
-                    >
-                      <div className="p-1.5 rounded-lg bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 shrink-0">
-                        <Clock className="w-4 h-4" />
+                    {pendingCount > 0 && (
+                      <Link
+                        to="/transactions"
+                        onClick={() => setNotifDropdownOpen(false)}
+                        className="flex items-start gap-3 p-2.5 rounded-lg hover:bg-amber-50 dark:hover:bg-amber-950/30 transition-colors"
+                      >
+                        <div className="p-1.5 rounded-lg bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 shrink-0">
+                          <Clock className="w-4 h-4" />
+                        </div>
+                        <div className="text-xs">
+                          <p className="font-semibold text-amber-900 dark:text-amber-300">
+                            {pendingCount} Transaksi Menunggu Verifikasi
+                          </p>
+                          <p className="text-slate-500 dark:text-slate-400 text-[11px] mt-0.5">
+                            Menunggu persetujuan bukti bayar dari bendahara.
+                          </p>
+                        </div>
+                      </Link>
+                    )}
+
+                    {overdueCount === 0 && pendingCount === 0 && (
+                      <div className="p-4 text-center text-xs text-slate-500 dark:text-slate-400 flex flex-col items-center">
+                        <CheckCircle2 className="w-6 h-6 mb-1 text-emerald-500" />
+                        <span>Tidak ada notifikasi sistem baru.</span>
                       </div>
-                      <div className="text-xs">
-                        <p className="font-semibold text-amber-900 dark:text-amber-300">
-                          {pendingCount} Transaksi Menunggu Verifikasi
-                        </p>
-                        <p className="text-slate-500 dark:text-slate-400 text-[11px] mt-0.5">
-                          Menunggu persetujuan bukti bayar dari bendahara.
-                        </p>
+                    )}
+                  </div>
+                ) : (
+                  /* Khusus User: Hanya menampilkan notifikasi pribadi, bukan notifikasi operasional admin */
+                  <div className="py-2 space-y-1.5">
+                    {userOverdueCount > 0 && (
+                      <Link
+                        to="/bills"
+                        onClick={() => setNotifDropdownOpen(false)}
+                        className="flex items-start gap-3 p-2.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors"
+                      >
+                        <div className="p-1.5 rounded-lg bg-rose-100 dark:bg-rose-900/40 text-rose-600 dark:text-rose-400 shrink-0">
+                          <AlertTriangle className="w-4 h-4" />
+                        </div>
+                        <div className="text-xs">
+                          <p className="font-semibold text-rose-900 dark:text-rose-300">
+                            {userOverdueCount} Tagihan Jatuh Tempo
+                          </p>
+                          <p className="text-slate-500 dark:text-slate-400 text-[11px] mt-0.5">
+                            Segera selesaikan pembayaran tagihan pendidikan Anda.
+                          </p>
+                        </div>
+                      </Link>
+                    )}
+
+                    {userPendingCount > 0 && (
+                      <Link
+                        to="/bills"
+                        onClick={() => setNotifDropdownOpen(false)}
+                        className="flex items-start gap-3 p-2.5 rounded-lg hover:bg-amber-50 dark:hover:bg-amber-950/30 transition-colors"
+                      >
+                        <div className="p-1.5 rounded-lg bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 shrink-0">
+                          <Clock className="w-4 h-4" />
+                        </div>
+                        <div className="text-xs">
+                          <p className="font-semibold text-amber-900 dark:text-amber-300">
+                            {userPendingCount} Pembayaran Menunggu Verifikasi
+                          </p>
+                          <p className="text-slate-500 dark:text-slate-400 text-[11px] mt-0.5">
+                            Bukti bayar Anda sedang diverifikasi oleh loket/bendahara.
+                          </p>
+                        </div>
+                      </Link>
+                    )}
+
+                    {userOverdueCount === 0 && userPendingCount === 0 && (
+                      <div className="p-4 text-center text-xs text-slate-500 dark:text-slate-400 flex flex-col items-center">
+                        <CheckCircle2 className="w-6 h-6 mb-1 text-emerald-500" />
+                        <span>Tidak ada tagihan jatuh tempo atau transaksi pending. Semua administrasi Anda tertib.</span>
                       </div>
-                    </Link>
-                  )}
-                </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>
